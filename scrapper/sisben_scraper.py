@@ -63,9 +63,63 @@ class SisbenScraperAuto:
         except Exception as e:
             print(f"⚠️ No se pudo limpiar el cache: {e}")
     
+    def _get_chrome_binary_path(self):
+        """Detecta la ruta del binario de Chrome según el sistema operativo"""
+        import platform
+        import shutil
+        
+        system = platform.system()
+        
+        # Posibles ubicaciones de Chrome/Chromium
+        possible_paths = []
+        
+        if system == "Linux":
+            possible_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+                "/snap/bin/chromium",
+                "/usr/local/bin/chrome",
+                "/usr/local/bin/chromium"
+            ]
+        elif system == "Windows":
+            possible_paths = [
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+                os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
+            ]
+        elif system == "Darwin":  # macOS
+            possible_paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium"
+            ]
+        
+        # Buscar el primer path que existe
+        for path in possible_paths:
+            if os.path.exists(path):
+                print(f"✅ Chrome encontrado en: {path}")
+                return path
+        
+        # Intentar usar 'which' en Linux/Mac
+        if system in ["Linux", "Darwin"]:
+            for cmd in ["google-chrome", "chromium-browser", "chromium"]:
+                chrome_path = shutil.which(cmd)
+                if chrome_path:
+                    print(f"✅ Chrome encontrado via which: {chrome_path}")
+                    return chrome_path
+        
+        print("⚠️ No se encontró Chrome en ubicaciones conocidas")
+        return None
+    
     def _create_chrome_options(self):
         """Crea un nuevo objeto ChromeOptions con la configuración necesaria"""
         options = uc.ChromeOptions()
+        
+        # Detectar y establecer ubicación del binario de Chrome
+        chrome_binary = self._get_chrome_binary_path()
+        if chrome_binary:
+            options.binary_location = chrome_binary
+            print(f"🔧 Usando Chrome en: {chrome_binary}")
         
         # Argumentos mínimos para evitar detección
         options.add_argument("--disable-blink-features=AutomationControlled")
@@ -76,6 +130,7 @@ class SisbenScraperAuto:
         options.add_argument("--window-size=1920,1080")
         options.add_argument("--disable-gpu")
         options.add_argument("--disable-extensions")
+        options.add_argument("--disable-software-rasterizer")
         
         if self.headless:
             options.add_argument("--headless=new")

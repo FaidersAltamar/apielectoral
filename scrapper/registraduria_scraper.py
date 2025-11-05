@@ -34,10 +34,64 @@ class RegistraduriaScraperAuto:
             print(f"💰 2captcha - {balance_info['balance_formatted']} ({balance_info['estimated_requests']} captchas disponibles)")
         else:
             print(f"⚠️ 2captcha - {balance_info.get('message', 'Error al obtener balance')}")
+
+    def _get_chrome_binary_path(self):
+        """Detecta la ruta del binario de Chrome según el sistema operativo"""
+        import platform
+        import shutil
+        
+        system = platform.system()
+        
+        # Posibles ubicaciones de Chrome/Chromium
+        possible_paths = []
+        
+        if system == "Linux":
+            possible_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/chromium-browser",
+                "/usr/bin/chromium",
+                "/snap/bin/chromium",
+                "/usr/local/bin/chrome",
+                "/usr/local/bin/chromium"
+            ]
+        elif system == "Windows":
+            possible_paths = [
+                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+                os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
+            ]
+        elif system == "Darwin":  # macOS
+            possible_paths = [
+                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+                "/Applications/Chromium.app/Contents/MacOS/Chromium"
+            ]
+        
+        # Buscar el primer path que existe
+        for path in possible_paths:
+            if os.path.exists(path):
+                print(f"✅ Chrome encontrado en: {path}")
+                return path
+        
+        # Intentar usar 'which' en Linux/Mac
+        if system in ["Linux", "Darwin"]:
+            for cmd in ["google-chrome", "chromium-browser", "chromium"]:
+                chrome_path = shutil.which(cmd)
+                if chrome_path:
+                    print(f"✅ Chrome encontrado via which: {chrome_path}")
+                    return chrome_path
+        
+        print("⚠️ No se encontró Chrome en ubicaciones conocidas")
+        return None
     
     def setup_driver(self, headless=False):
         """Configura el driver de Chrome con soporte para extensiones"""
         chrome_options = Options()
+        
+        # Detectar y establecer ubicación del binario de Chrome
+        chrome_binary = self._get_chrome_binary_path()
+        if chrome_binary:
+            chrome_options.binary_location = chrome_binary
+            print(f"🔧 Usando Chrome en: {chrome_binary}")
         
         if headless:
             chrome_options.add_argument("--headless")
@@ -46,6 +100,8 @@ class RegistraduriaScraperAuto:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--disable-gpu")
+        chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
         chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
         chrome_options.add_experimental_option('useAutomationExtension', False)
