@@ -15,12 +15,12 @@ class Settings:
     API_DESCRIPTION = "API para consultar información de puestos de Votación Funete de datos Registraduría Nacional del Estado Civil"
     
     # Configuración de endpoints externos
-    EXTERNAL_API_URL = 'http://localhost/votantes/api/v1/respuestaapi'
-    EXTERNAL_API_NOMBRE_URL = 'http://localhost/votantes/api/v1/respuestanombreapi'
-    EXTERNAL_API_PUESTO_URL = 'http://localhost/votantes/api/v1/respuestapuestoapi'
+    EXTERNAL_API_NOMBRE_URL = os.getenv('EXTERNAL_API_NOMBRE_URL')
+    EXTERNAL_API_PUESTO_URL = os.getenv('EXTERNAL_API_PUESTO_URL')
     
     # Configuración CORS
-    CORS_ORIGINS = [
+    CORS_ORIGINS = [        
+        "https://api.juliocesarjarava.com.co/",
         "http://localhost",
         "http://localhost:3000",
         "http://localhost:8000",
