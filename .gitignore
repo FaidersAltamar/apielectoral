@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+venv/
+env/
+ENV/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment
+.env
+.env.local
+
+# Tasks JSON files (persistencia local)
+tasks/*.json
+
+# Logs
+*.log
+
+# Debug screenshots
+error_*.png
+debug_*.png
+*_screenshot_*.png
+
+# OS
+.DS_Store
+Thumbs.db
+
+**/__pycache__/
+**/__pycache__
+**/__pycache__
