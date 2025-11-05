@@ -1,11 +1,12 @@
 import time
 import json
 import os
-import undetected_chromedriver as uc
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from datetime import datetime
 
@@ -13,121 +14,59 @@ from datetime import datetime
 class ProcuraduriaScraperAuto:
     """Scraper automatizado para consultas de antecedentes en la Procuraduría"""
     
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, extension_path=None):
         """
         Inicializa el scraper de Procuraduría
         
         Args:
             headless (bool): Si ejecutar el navegador en modo headless
+            extension_path (str): Ruta a la extensión de Chrome (opcional)
         """
         self.headless = headless
+        self.extension_path = extension_path
         self.driver = None
         self.wait = None
-        self.setup_driver()
+        self.setup_driver(headless)
     
-    def _get_chrome_binary_path(self):
-        """Detecta la ruta del binario de Chrome según el sistema operativo"""
-        import platform
-        import shutil
+    def setup_driver(self, headless=False):
+        """Configura el driver de Chrome con soporte para extensiones"""
+        chrome_options = Options()
         
-        system = platform.system()
+        if headless:
+            chrome_options.add_argument("--headless")
         
-        # Posibles ubicaciones de Chrome/Chromium
-        possible_paths = []
+        # Configuraciones para evitar detección
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        if system == "Linux":
-            possible_paths = [
-                "/usr/bin/google-chrome",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/chromium",
-                "/snap/bin/chromium",
-                "/usr/local/bin/chrome",
-                "/usr/local/bin/chromium"
-            ]
-        elif system == "Windows":
-            possible_paths = [
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
-            ]
-        elif system == "Darwin":  # macOS
-            possible_paths = [
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                "/Applications/Chromium.app/Contents/MacOS/Chromium"
-            ]
+        # Cargar extensión si se proporciona la ruta
+        if self.extension_path:
+            if os.path.exists(self.extension_path):
+                chrome_options.add_argument(f"--load-extension={self.extension_path}")
+                print(f"🔌 Cargando extensión desde: {self.extension_path}")
+            else:
+                print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
         
-        # Buscar el primer path que existe
-        for path in possible_paths:
-            if os.path.exists(path):
-                print(f"✅ Chrome encontrado en: {path}")
-                return path
+        # Permitir extensiones en modo incógnito (opcional)
+        chrome_options.add_argument("--allow-running-insecure-content")
+        chrome_options.add_argument("--disable-web-security")
         
-        # Intentar usar 'which' en Linux/Mac
-        if system in ["Linux", "Darwin"]:
-            for cmd in ["google-chrome", "chromium-browser", "chromium"]:
-                chrome_path = shutil.which(cmd)
-                if chrome_path:
-                    print(f"✅ Chrome encontrado via which: {chrome_path}")
-                    return chrome_path
+        self.driver = webdriver.Chrome(options=chrome_options)
         
-        print("⚠️ No se encontró Chrome en ubicaciones conocidas")
-        return None
-    
-    def setup_driver(self):
-        """Configura el driver de Chrome con undetected-chromedriver"""
-        try:
-            print("🔧 Configurando undetected-chromedriver para Procuraduría...")
-            
-            # Detectar ubicación de Chrome
-            chrome_binary = self._get_chrome_binary_path()
-            
-            # Configurar opciones básicas
-            options = uc.ChromeOptions()
-            
-            # Establecer la ubicación del binario si se encontró
-            if chrome_binary:
-                options.binary_location = chrome_binary
-                print(f"🔧 Usando Chrome en: {chrome_binary}")
-            
-            # Argumentos mínimos para evitar detección
-            options.add_argument("--disable-blink-features=AutomationControlled")
-            options.add_argument("--disable-dev-shm-usage")
-            options.add_argument("--no-sandbox")
-            options.add_argument("--disable-infobars")
-            options.add_argument("--disable-notifications")
-            options.add_argument("--window-size=1920,1080")
-            options.add_argument("--disable-gpu")
-            options.add_argument("--disable-software-rasterizer")
-            
-            if self.headless:
-                options.add_argument("--headless=new")
-            
-            # Crear driver con configuración optimizada para bypass
-            print("🚀 Iniciando Chrome con bypass anti-detección...")
-            self.driver = uc.Chrome(
-                options=options,
-                version_main=None,
-                use_subprocess=False,
-                suppress_welcome=True,
-                headless=self.headless
-            )
-            
-            # Configurar timeouts optimizados
-            self.driver.set_page_load_timeout(30)
-            self.wait = WebDriverWait(self.driver, 20)
-            
-            # Maximizar ventana si no es headless
-            if not self.headless:
-                self.driver.maximize_window()
-            
-            print("✅ Driver de Chrome (undetected) configurado para Procuraduría")
-            print(f"📍 Versión de Chrome detectada: {self.driver.capabilities.get('browserVersion', 'Unknown')}")
-            
-        except Exception as e:
-            print(f"❌ Error al configurar el driver: {e}")
-            import traceback
-            traceback.print_exc()
-            raise
+        # Ejecutar script para ocultar webdriver
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # Configurar wait
+        self.wait = WebDriverWait(self.driver, 20)
+        
+        # Si hay extensión cargada, esperar un momento para que se inicialice
+        if self.extension_path:
+            print("⏳ Esperando que la extensión se inicialice...")
+            time.sleep(3)
     
     def scrape_nuip(self, numero_id, max_retries=3):
         """

@@ -1,264 +1,71 @@
 import time
 import json
 import os
-import undetected_chromedriver as uc
+from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
+from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from datetime import datetime
 
 class SisbenScraperAuto:
     """Scraper automatizado para consultas de nombres en el sistema de la Policía Nacional"""
     
-    def __init__(self, headless=False):
+    def __init__(self, headless=False, extension_path=None):
         """
         Inicializa el scraper de Sisben
         
         Args:
             headless (bool): Si ejecutar el navegador en modo headless
+            extension_path (str): Ruta a la extensión de Chrome (opcional)
         """
         self.headless = headless
+        self.extension_path = extension_path
         self.driver = None
         self.wait = None
-        self.setup_driver()
+        self.setup_driver(headless)
     
-    def _cleanup_driver_cache(self):
-        """Limpia el cache de drivers si está corrupto"""
-        import shutil
+    def setup_driver(self, headless=False):
+        """Configura el driver de Chrome con soporte para extensiones"""
+        chrome_options = Options()
         
-        try:
-            # Ruta del cache de undetected-chromedriver en Windows
-            cache_path = os.path.join(os.getenv('APPDATA'), 'undetected_chromedriver')
-            
-            if os.path.exists(cache_path):
-                # Verificar si hay archivos problemáticos
-                driver_exe = os.path.join(cache_path, 'undetected_chromedriver.exe')
-                if os.path.exists(driver_exe):
-                    # Intentar eliminar el archivo si está bloqueado
-                    try:
-                        os.remove(driver_exe)
-                        print("🧹 Cache de driver limpiado preventivamente")
-                    except (PermissionError, OSError):
-                        # El archivo está en uso, no hacer nada
-                        pass
-        except Exception as e:
-            # Si falla la limpieza, continuar de todos modos
-            pass
-    
-    def _force_cleanup_driver_cache(self):
-        """Fuerza la limpieza completa del cache de drivers"""
-        import shutil
+        if headless:
+            chrome_options.add_argument("--headless")
         
-        try:
-            # Ruta del cache de undetected-chromedriver en Windows
-            cache_path = os.path.join(os.getenv('APPDATA'), 'undetected_chromedriver')
-            
-            if os.path.exists(cache_path):
-                print(f"🧹 Eliminando cache completo: {cache_path}")
-                shutil.rmtree(cache_path, ignore_errors=True)
-                time.sleep(1)  # Esperar un momento para que el sistema libere los archivos
-                print("✅ Cache eliminado exitosamente")
-        except Exception as e:
-            print(f"⚠️ No se pudo limpiar el cache: {e}")
-    
-    def _get_chrome_binary_path(self):
-        """Detecta la ruta del binario de Chrome según el sistema operativo"""
-        import platform
-        import shutil
+        # Configuraciones para evitar detección
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+        chrome_options.add_experimental_option('useAutomationExtension', False)
         
-        system = platform.system()
+        # Cargar extensión si se proporciona la ruta
+        if self.extension_path:
+            if os.path.exists(self.extension_path):
+                chrome_options.add_argument(f"--load-extension={self.extension_path}")
+                print(f"🔌 Cargando extensión desde: {self.extension_path}")
+            else:
+                print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
         
-        # Posibles ubicaciones de Chrome/Chromium
-        possible_paths = []
+        # Permitir extensiones en modo incógnito (opcional)
+        chrome_options.add_argument("--allow-running-insecure-content")
+        chrome_options.add_argument("--disable-web-security")
         
-        if system == "Linux":
-            possible_paths = [
-                "/usr/bin/google-chrome",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/chromium",
-                "/snap/bin/chromium",
-                "/usr/local/bin/chrome",
-                "/usr/local/bin/chromium"
-            ]
-        elif system == "Windows":
-            possible_paths = [
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
-            ]
-        elif system == "Darwin":  # macOS
-            possible_paths = [
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                "/Applications/Chromium.app/Contents/MacOS/Chromium"
-            ]
+        self.driver = webdriver.Chrome(options=chrome_options)
         
-        # Buscar el primer path que existe
-        for path in possible_paths:
-            if os.path.exists(path):
-                print(f"✅ Chrome encontrado en: {path}")
-                return path
+        # Ejecutar script para ocultar webdriver
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
-        # Intentar usar 'which' en Linux/Mac
-        if system in ["Linux", "Darwin"]:
-            for cmd in ["google-chrome", "chromium-browser", "chromium"]:
-                chrome_path = shutil.which(cmd)
-                if chrome_path:
-                    print(f"✅ Chrome encontrado via which: {chrome_path}")
-                    return chrome_path
+        # Configurar wait
+        self.wait = WebDriverWait(self.driver, 15)
         
-        print("⚠️ No se encontró Chrome en ubicaciones conocidas")
-        return None
-    
-    def _create_chrome_options(self):
-        """Crea un nuevo objeto ChromeOptions con la configuración necesaria"""
-        options = uc.ChromeOptions()
-        
-        # Detectar y establecer ubicación del binario de Chrome
-        chrome_binary = self._get_chrome_binary_path()
-        if chrome_binary:
-            options.binary_location = chrome_binary
-            print(f"🔧 Usando Chrome en: {chrome_binary}")
-        
-        # Argumentos mínimos para evitar detección
-        options.add_argument("--disable-blink-features=AutomationControlled")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-infobars")
-        options.add_argument("--disable-notifications")
-        options.add_argument("--window-size=1920,1080")
-        options.add_argument("--disable-gpu")
-        options.add_argument("--disable-extensions")
-        options.add_argument("--disable-software-rasterizer")
-        
-        if self.headless:
-            options.add_argument("--headless=new")
-        
-        return options
-    
-    def _get_chrome_version(self):
-        """Detecta la versión de Chrome instalada"""
-        import subprocess
-        import re
-        
-        try:
-            # Intentar obtener la versión de Chrome en Windows
-            result = subprocess.run(
-                ['reg', 'query', 'HKEY_CURRENT_USER\\Software\\Google\\Chrome\\BLBeacon', '/v', 'version'],
-                capture_output=True,
-                text=True
-            )
-            
-            if result.returncode == 0:
-                match = re.search(r'version\s+REG_SZ\s+(\d+)', result.stdout)
-                if match:
-                    version = int(match.group(1))
-                    print(f"📍 Chrome versión detectada: {version}")
-                    return version
-        except Exception as e:
-            print(f"⚠️ No se pudo detectar la versión de Chrome: {e}")
-        
-        return None
-    
-    def setup_driver(self):
-        """Configura el driver de Chrome con undetected-chromedriver"""
-        try:
-            print("🔧 Configurando undetected-chromedriver...")
-            
-            # Detectar versión de Chrome
-            chrome_version = self._get_chrome_version()
-            
-            # Limpiar cache corrupto si existe
-            self._cleanup_driver_cache()
-            
-            # Crear driver con configuración optimizada para bypass
-            print("🚀 Iniciando Chrome con bypass anti-detección...")
-            
-            # Intentar con diferentes configuraciones
-            try:
-                # Primer intento: configuración estándar con versión específica
-                options = self._create_chrome_options()
-                self.driver = uc.Chrome(
-                    options=options,
-                    driver_executable_path=None,
-                    version_main=chrome_version,  # Usar la versión detectada
-                    use_subprocess=False,
-                    suppress_welcome=True,
-                    headless=self.headless
-                )
-            except FileExistsError as fe:
-                print(f"⚠️ Error de archivo existente detectado: {fe}")
-                print("🧹 Limpiando cache y reintentando...")
-                self._force_cleanup_driver_cache()
-                
-                try:
-                    # Crear nuevas opciones para el reintento
-                    options = self._create_chrome_options()
-                    self.driver = uc.Chrome(
-                        options=options,
-                        driver_executable_path=None,
-                        version_main=chrome_version,
-                        use_subprocess=False,
-                        suppress_welcome=True,
-                        headless=self.headless
-                    )
-                except Exception as e_retry:
-                    print(f"⚠️ Reintento después de limpieza falló: {e_retry}")
-                    raise
-                    
-            except Exception as e1:
-                error_msg = str(e1).lower()
-                
-                # Si es un error de versión de Chrome, intentar con use_subprocess=True
-                if "version" in error_msg or "chromedriver" in error_msg:
-                    print(f"⚠️ Error de versión detectado: {e1}")
-                    print("🔄 Intentando con configuración alternativa...")
-                    
-                    try:
-                        # Segundo intento: con use_subprocess=True
-                        options = self._create_chrome_options()
-                        self.driver = uc.Chrome(
-                            options=options,
-                            driver_executable_path=None,
-                            version_main=chrome_version,
-                            use_subprocess=True
-                        )
-                    except Exception as e2:
-                        print(f"⚠️ Segundo intento falló: {e2}")
-                        print("🔄 Intentando con configuración mínima...")
-                        
-                        # Tercer intento: configuración mínima
-                        options = self._create_chrome_options()
-                        self.driver = uc.Chrome(
-                            options=options,
-                            version_main=chrome_version
-                        )
-                else:
-                    # Si no es un error de versión, re-lanzar
-                    raise
-            
-            # Configurar timeouts optimizados
-            self.driver.set_page_load_timeout(30)
-            self.wait = WebDriverWait(self.driver, 15)
-            
-            # Maximizar ventana si no es headless
-            if not self.headless:
-                self.driver.maximize_window()
-            
-            print("✅ Driver de Chrome (undetected) configurado correctamente")
-            print(f"📍 Versión de Chrome detectada: {self.driver.capabilities.get('browserVersion', 'Unknown')}")
-            
-        except Exception as e:
-            print(f"❌ Error al configurar el driver: {e}")
-            print("\n💡 Soluciones posibles:")
-            print("1. Verifica que Chrome esté instalado correctamente")
-            print("2. Actualiza undetected-chromedriver: pip install --upgrade undetected-chromedriver")
-            print("3. Limpia el cache de drivers: elimina la carpeta %USERPROFILE%\\.wdm")
-            print("4. Intenta ejecutar con permisos de administrador")
-            import traceback
-            traceback.print_exc()
-            raise
+        # Si hay extensión cargada, esperar un momento para que se inicialice
+        if self.extension_path:
+            print("⏳ Esperando que la extensión se inicialice...")
+            time.sleep(3)
     
     def scrape_name_by_nuip(self, nuip, max_retries=3):
         """
