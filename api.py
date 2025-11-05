@@ -562,7 +562,7 @@ def send_voting_place_to_external_api(numero_documento: str, voting_data: dict) 
 
 async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     """
-    Procesa un solo NUIP buscando el nombre en Procuraduría y Sisben
+    Procesa un solo NUIP buscando el nombre en Sisben y consultando Registraduría
     
     Args:
         nuip: Número de identificación a consultar
@@ -576,105 +576,7 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     source = None
     
     try:
-        # 1. Buscar en Procuraduría primero (con 2 intentos y timeout)
-        max_intentos_procuraduria = 2
-        for intento_procuraduria in range(1, max_intentos_procuraduria + 1):
-            scraper_procuraduria = None
-            try:
-                print(f"🔍 Procuraduría - Intento {intento_procuraduria}/{max_intentos_procuraduria}")
-                scraper_procuraduria = ProcuraduriaScraperAuto(headless=False)
-                
-                # Usar timeout de 90 segundos para Procuraduría
-                result_procuraduria = await asyncio.wait_for(
-                    asyncio.to_thread(scraper_procuraduria.scrape_nuip, nuip),
-                    timeout=90.0
-                )
-                
-                # Verificar si se encontró el nombre
-                if result_procuraduria.get("status") == "success":
-                    extracted_name = result_procuraduria.get("name", "")
-                    if extracted_name and extracted_name.strip():
-                        name = extracted_name.strip()
-                        source = "procuraduria"
-                        print(f"✅ Nombre encontrado en Procuraduría: {name}")
-                        break  # Salir del loop si se encontró
-            except asyncio.TimeoutError:
-                print(f"⏱️ Timeout en Procuraduría intento {intento_procuraduria} (90s excedidos)")
-            except Exception as e:
-                print(f"⚠️ Error en Procuraduría intento {intento_procuraduria}: {e}")
-            finally:
-                if scraper_procuraduria:
-                    try:
-                        scraper_procuraduria.close()
-                    except Exception as close_error:
-                        print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
-            
-            # Esperar un poco antes del siguiente intento (solo si no es el último)
-            if intento_procuraduria < max_intentos_procuraduria and not name:
-                await asyncio.sleep(2)
-        
-        # Si ya encontró el nombre en Procuraduría, enviar al API y luego consultar puesto
-        if name:
-            # 1. PRIMERO: Enviar nombre al endpoint externo (solo si enviarapi=True)
-            nombre_response = {}
-            if enviarapi:
-                print(f"📤 Enviando nombre al API externo...")
-                nombre_response = send_name_to_external_api(nuip, name)
-            
-            # 2. SEGUNDO: Consultar puesto de votación
-            voting_data = None
-            scraper_registraduria = None
-            try:
-                print(f"🗳️ Consultando puesto de votación para {nuip}...")
-                scraper_registraduria = RegistraduriaScraperAuto(API_KEY, headless=True)
-                
-                # Usar asyncio.wait_for para timeout de 120 segundos
-                voting_result = await asyncio.wait_for(
-                    asyncio.to_thread(scraper_registraduria.scrape_nuip, nuip),
-                    timeout=120.0
-                )
-                
-                if voting_result.get("status") == "success":
-                    data_records = voting_result.get("data", [])
-                    if data_records and len(data_records) > 0:
-                        voting_data = data_records[0]
-                        print(f"✅ Puesto de votación encontrado: {voting_data.get('PUESTO', 'N/A')}")
-                    else:
-                        print(f"⚠️ No se encontró puesto de votación")
-                else:
-                    print(f"⚠️ Error al consultar puesto de votación: {voting_result.get('message', 'Unknown')}")
-            except asyncio.TimeoutError:
-                print(f"⏱️ Timeout al consultar puesto de votación (120s excedidos)")
-                voting_data = None
-            except Exception as e:
-                print(f"⚠️ Error al consultar puesto de votación: {e}")
-            finally:
-                if scraper_registraduria:
-                    try:
-                        scraper_registraduria.close()
-                    except Exception as close_error:
-                        print(f"⚠️ Error al cerrar scraper de registraduría: {close_error}")
-            
-            # 3. TERCERO: Enviar puesto de votación al endpoint externo (solo si enviarapi=True y se encontró)
-            puesto_response = {}
-            if enviarapi and voting_data:
-                print(f"📤 Enviando puesto de votación al API externo...")
-                puesto_response = send_voting_place_to_external_api(nuip, voting_data)
-            
-            response_time_seconds, execution_time = calculate_response_time(start_time)
-            
-            return {
-                "nuip": nuip,
-                "status": "success",
-                "name": name,
-                "voting_place": voting_data,
-                "execution_time": execution_time,
-                "source": source,
-                **nombre_response,
-                **puesto_response
-            }
-        
-        # 2. Si no se encontró en Procuraduría, buscar en Sisben (con 1 intento y timeout)
+        # 1. Buscar en Sisben (con 1 intento y timeout)
         max_intentos_sisben = 1
         for intento_sisben in range(1, max_intentos_sisben + 1):
             scraper_sisben = None
@@ -797,8 +699,8 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
 async def get_name_sequential(request: ConsultaNombreRequest):
     """
     Endpoint que busca nombres para múltiples NUIPs secuencialmente en:
-    1. Procuraduría
-    2. Sisben (solo si no se encontró en Procuraduría)
+    1. Sisben
+    2. Registraduría (para puesto de votación)
     
     Si encuentra el nombre, lo envía automáticamente al endpoint externo.
     
@@ -872,6 +774,7 @@ async def get_name_sequential(request: ConsultaNombreRequest):
         "total_execution_time": total_execution_time,
         "results": results
     }
+
 
 @app.post("/bulk/name")
 async def create_bulk_name_task(request: BulkNameRequest, background_tasks: BackgroundTasks):
