@@ -133,39 +133,52 @@ jobs:
               
               # Intentar matar procesos existentes
               echo "🔍 Checking for existing processes..."
-              if pgrep -f "python.*api.py" > /dev/null; then
-                echo "   Found existing process, killing..."
-                pkill -f "python.*api.py" || true
+              if pgrep -f "uvicorn.*api:app" > /dev/null; then
+                echo "   Found existing uvicorn process, killing..."
+                pkill -9 -f "uvicorn.*api:app" || true
                 sleep 2
+              elif pgrep -f "python.*api.py" > /dev/null; then
+                echo "   Found existing python process, killing..."
+                pkill -9 -f "python.*api.py" || true
+                sleep 2
+              else
+                echo "   No existing processes found"
               fi
               
-              # Iniciar aplicación en background
-              echo "🚀 Starting application in background..."
+              # Iniciar aplicación en background completamente desacoplada
+              echo "🚀 Starting application with uvicorn..."
               cd "$PROJECT_DIR"
-              nohup venv/bin/python api.py > app.log 2>&1 &
+              
+              # Usar setsid y disown para desacoplar completamente del shell
+              setsid venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --workers 2 > app.log 2>&1 < /dev/null &
               APP_PID=$!
+              disown
+              
               echo "   Started with PID: $APP_PID"
               
               # Esperar a que inicie
-              sleep 3
+              sleep 5
               
-              # Verificar que está corriendo
-              if ps -p $APP_PID > /dev/null 2>&1; then
-                echo "✅ Application is running (PID: $APP_PID)"
+              # Verificar que está corriendo (buscar por nombre ya que puede tener otro PID)
+              if pgrep -f "uvicorn.*api:app" > /dev/null; then
+                ACTUAL_PID=$(pgrep -f "uvicorn.*api:app")
+                echo "✅ Application is running (PID: $ACTUAL_PID)"
               else
                 echo "❌ Application failed to start"
-                echo "📋 Last 20 lines of app.log:"
-                tail -20 app.log || echo "   (log file not found)"
+                echo "📋 Last 30 lines of app.log:"
+                tail -30 app.log 2>/dev/null || echo "   (log file not found)"
                 exit 1
               fi
               
               # Verificar que responde
               echo "🔍 Testing API endpoint..."
-              sleep 2
+              sleep 3
               if curl -s http://localhost:8000/balance > /dev/null; then
                 echo "✅ API is responding"
               else
                 echo "⚠️  API not responding yet (may need more time to start)"
+                echo "📋 Checking app.log for errors:"
+                tail -10 app.log 2>/dev/null || echo "   (log file not found)"
               fi
             fi
 
