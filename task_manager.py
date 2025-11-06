@@ -327,7 +327,7 @@ async def process_bulk_name_task(task_id: str, nuips: List[str], fecha_expedicio
                 if not name:
                     scraper_procuraduria = None
                     try:
-                        scraper_procuraduria = ProcuraduriaScraperAuto(headless=True)
+                        scraper_procuraduria = ProcuraduriaScraperAuto(headless=False)
                         result_procuraduria = scraper_procuraduria.scrape_nuip(nuip)
                         
                         if result_procuraduria.get("status") == "success":

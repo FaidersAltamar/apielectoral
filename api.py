@@ -99,7 +99,7 @@ async def get_procuraduria_data(request: PeticionRequest):
     start_time = time.time()
     scraper = None
     try:
-        scraper = ProcuraduriaScraperAuto(headless=True)
+        scraper = ProcuraduriaScraperAuto(headless=False)
         result = scraper.scrape_nuip(request.nuip)
         
         # Si enviarapi es True y se encontró el nombre, enviar al API externo
@@ -278,7 +278,7 @@ async def get_combined_data(request: PeticionRequest):
     async def fetch_procuraduria():
         scraper = None
         try:
-            scraper = ProcuraduriaScraperAuto(headless=True)
+            scraper = ProcuraduriaScraperAuto(headless=False)
             result = await asyncio.to_thread(scraper.scrape_nuip, request.nuip)
             return {"success": True, "data": result, "source": "procuraduria"}
         except Exception as e:
