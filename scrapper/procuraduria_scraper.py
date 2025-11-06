@@ -31,6 +31,37 @@ class ProcuraduriaScraperAuto:
         """Configura el driver de Chrome usando undetected_chromedriver"""
         chrome_options = uc.ChromeOptions()
         
+        # Detectar ubicación de Chrome según el sistema operativo
+        chrome_binary = None
+        if os.name == 'nt':  # Windows
+            possible_paths = [
+                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
+                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
+                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")
+            ]
+        else:  # Linux/Unix
+            possible_paths = [
+                "/usr/bin/google-chrome",
+                "/usr/bin/google-chrome-stable",
+                "/usr/bin/chromium",
+                "/usr/bin/chromium-browser",
+                "/snap/bin/chromium",
+                "/usr/local/bin/google-chrome",
+                "/opt/google/chrome/google-chrome"
+            ]
+        
+        for path in possible_paths:
+            if os.path.exists(path):
+                chrome_binary = path
+                print(f"✅ Chrome encontrado en: {chrome_binary}")
+                break
+        
+        # Configurar binary_location si se encontró
+        if chrome_binary:
+            chrome_options.binary_location = chrome_binary
+        else:
+            print("⚠️ No se detectó Chrome automáticamente, intentando con ruta por defecto")
+        
         if headless:
             chrome_options.add_argument("--headless=new")
             chrome_options.add_argument("--disable-gpu")
@@ -70,6 +101,8 @@ class ProcuraduriaScraperAuto:
         except Exception as e:
             print(f"❌ Error al inicializar Chrome: {e}")
             print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
+            if not chrome_binary:
+                print("⚠️ No se pudo detectar la ubicación de Chrome automáticamente")
             raise
         
         # Configurar wait
