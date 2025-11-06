@@ -41,7 +41,10 @@ sudo chown -R ubuntu:ubuntu /var/www/html/apielectoral
 cd /var/www/html/apielectoral
 git config --global --add safe.directory /var/www/html/apielectoral
 
-# 4. Recrear virtual environment
+# 4. Instalar python3-venv y recrear virtual environment
+sudo apt update
+sudo apt install -y python3-venv python3-full python3-pip
+
 rm -rf venv
 python3 -m venv venv
 source venv/bin/activate
@@ -50,10 +53,15 @@ pip install -r requirements.txt
 
 # 5. Configurar permisos sudo
 sudo bash -c 'cat > /etc/sudoers.d/api-electoral-deploy << EOF
+# Permisos para GitHub Actions deployment
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/chown
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt update
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt install
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl status api-electoral
+ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl stop api-electoral
+ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl start api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl list-unit-files
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/pkill
 EOF'

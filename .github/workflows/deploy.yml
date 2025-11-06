@@ -75,20 +75,37 @@ jobs:
               rm -rf venv
             fi
             
+            # Verificar e instalar python3-venv si es necesario
+            if ! dpkg -l | grep -q python3.*-venv; then
+              echo "📦 Installing python3-venv..."
+              sudo apt update -qq
+              sudo apt install -y python3-venv python3-full
+            fi
+            
             # Crear virtual environment si no existe
             if [ ! -d venv ]; then
               echo "📦 Creating virtual environment..."
               python3 -m venv venv
               if [ $? -ne 0 ]; then
-                echo "❌ Failed to create venv, trying with sudo..."
-                sudo python3 -m venv venv
-                sudo chown -R ubuntu:ubuntu venv
+                echo "❌ Failed to create venv, installing dependencies..."
+                sudo apt update -qq
+                sudo apt install -y python3-venv python3-full python3-pip
+                python3 -m venv venv
+                if [ $? -ne 0 ]; then
+                  echo "❌ Still failed, trying with sudo..."
+                  sudo python3 -m venv venv
+                  sudo chown -R ubuntu:ubuntu venv
+                fi
               fi
             fi
             
             # Verificar que venv se creó correctamente
             if [ ! -f venv/bin/activate ]; then
               echo "❌ Virtual environment activation script not found"
+              echo "📋 Debugging info:"
+              echo "   Python version: $(python3 --version)"
+              echo "   Python location: $(which python3)"
+              echo "   Venv module: $(python3 -m venv --help > /dev/null 2>&1 && echo 'OK' || echo 'NOT FOUND')"
               exit 1
             fi
             

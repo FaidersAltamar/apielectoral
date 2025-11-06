@@ -72,8 +72,20 @@ else
     exit 1
 fi
 
-# Paso 3: Limpiar y crear venv
-step "Paso 3/8: Configurando virtual environment..."
+# Paso 3: Instalar python3-venv si es necesario
+step "Paso 3/8: Verificando python3-venv..."
+if ! dpkg -l | grep -q python3.*-venv; then
+    warning "python3-venv no está instalado"
+    echo "Instalando python3-venv..."
+    sudo apt update -qq
+    sudo apt install -y python3-venv python3-full python3-pip
+    success "python3-venv instalado"
+else
+    success "python3-venv ya está instalado"
+fi
+
+# Paso 3b: Limpiar y crear venv
+step "Configurando virtual environment..."
 if [ -d venv ]; then
     warning "Virtual environment existente encontrado"
     read -p "¿Deseas recrearlo? (s/n): " -n 1 -r
@@ -87,6 +99,13 @@ fi
 if [ ! -d venv ]; then
     echo "Creando virtual environment..."
     python3 -m venv venv
+    if [ $? -ne 0 ]; then
+        error "Fallo al crear venv"
+        echo "Intentando instalar dependencias..."
+        sudo apt update -qq
+        sudo apt install -y python3-venv python3-full python3-pip
+        python3 -m venv venv
+    fi
     success "Virtual environment creado"
 else
     success "Virtual environment ya existe"
@@ -158,6 +177,8 @@ else
 # Permisos para GitHub Actions deployment
 $USER ALL=(ALL) NOPASSWD: /usr/bin/chown
 $USER ALL=(ALL) NOPASSWD: /usr/bin/python3
+$USER ALL=(ALL) NOPASSWD: /usr/bin/apt update
+$USER ALL=(ALL) NOPASSWD: /usr/bin/apt install
 $USER ALL=(ALL) NOPASSWD: /bin/systemctl restart api-electoral
 $USER ALL=(ALL) NOPASSWD: /bin/systemctl status api-electoral
 $USER ALL=(ALL) NOPASSWD: /bin/systemctl stop api-electoral

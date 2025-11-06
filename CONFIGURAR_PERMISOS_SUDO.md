@@ -26,6 +26,8 @@ Agrega estas líneas al **final** del archivo:
 # Permisos para GitHub Actions deployment
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/chown
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt update
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt install
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl status api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl stop api-electoral
@@ -64,6 +66,8 @@ Agrega:
 # Permisos específicos para deployment en /var/www/html/apielectoral
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/chown -R ubuntu\:ubuntu /var/www/html/apielectoral*
 ubuntu ALL=(ALL) NOPASSWD: /usr/bin/python3 -m venv /var/www/html/apielectoral/venv
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt update -qq
+ubuntu ALL=(ALL) NOPASSWD: /usr/bin/apt install -y python3-venv python3-full python3-pip
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl restart api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl status api-electoral
 ubuntu ALL=(ALL) NOPASSWD: /bin/systemctl list-unit-files
