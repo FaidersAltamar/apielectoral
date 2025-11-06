@@ -8,8 +8,14 @@ User=ubuntu
 Group=ubuntu
 WorkingDirectory=/var/www/html/apielectoral
 Environment="PATH=/var/www/html/apielectoral/venv/bin"
+Environment="ENVIRONMENT=production"
+Environment="PORT=8000"
+Environment="WORKERS=2"
 EnvironmentFile=/var/www/html/apielectoral/.env
-ExecStart=/var/www/html/apielectoral/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --workers 2
+
+# Usar run.py en lugar de uvicorn directamente
+ExecStart=/var/www/html/apielectoral/venv/bin/python run.py
+
 Restart=always
 RestartSec=5
 
@@ -19,6 +25,9 @@ LimitNOFILE=65536
 # Logs
 StandardOutput=journal
 StandardError=journal
+
+# Variables de entorno para Playwright
+Environment="PLAYWRIGHT_BROWSERS_PATH=/var/www/html/apielectoral/.playwright"
 
 [Install]
 WantedBy=multi-user.target

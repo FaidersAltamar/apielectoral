@@ -9,6 +9,10 @@ import time
 import requests
 from datetime import datetime
 
+# Configurar ProactorEventLoop para Windows (necesario para Playwright)
+if sys.platform == 'win32':
+    asyncio.set_event_loop_policy(asyncio.WindowsProactorEventLoopPolicy())
+
 # Importar utilidades
 from models.request import PeticionRequest, BulkSisbenRequest, BulkNameRequest, ConsultaNombreRequest
 from utils.time_utils import format_execution_time, calculate_response_time, get_current_timestamp
@@ -100,7 +104,7 @@ async def get_procuraduria_data(request: PeticionRequest):
     scraper = None
     try:
         scraper = ProcuraduriaScraperAuto(headless=False)
-        result = scraper.scrape_nuip(request.nuip)
+        result = await scraper.scrape_nuip(request.nuip)
         
         # Si enviarapi es True y se encontró el nombre, enviar al API externo
         if request.enviarapi and result.get("status") == "success":
@@ -124,7 +128,7 @@ async def get_procuraduria_data(request: PeticionRequest):
         )
     finally:
         if scraper:
-            scraper.close()
+            await scraper.close()
     
 @app.post("/consultar-nombres-v2")
 async def get_police_data(request: PeticionRequest):
@@ -279,14 +283,14 @@ async def get_combined_data(request: PeticionRequest):
         scraper = None
         try:
             scraper = ProcuraduriaScraperAuto(headless=False)
-            result = await asyncio.to_thread(scraper.scrape_nuip, request.nuip)
+            result = await scraper.scrape_nuip(request.nuip)
             return {"success": True, "data": result, "source": "procuraduria"}
         except Exception as e:
             return {"success": False, "error": str(e), "source": "procuraduria"}
         finally:
             if scraper:
                 try:
-                    scraper.close()
+                    await scraper.close()
                 except:
                     pass
     

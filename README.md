@@ -18,15 +18,20 @@ source venv/bin/activate  # En Windows: venv\Scripts\activate
 # Instalar dependencias
 pip install -r requirements.txt
 
+# Instalar navegadores de Playwright (para Procuraduría)
+playwright install chromium
+
 # Configurar variables de entorno
 cp .env.example .env
 # Editar .env con tus valores
 
-# Ejecutar
-python api.py
+# Ejecutar (IMPORTANTE: usar run.py en Windows)
+python run.py
 ```
 
 La API estará disponible en: http://localhost:8000
+
+**⚠️ IMPORTANTE para Windows:** Usa `python run.py` en lugar de `uvicorn api:app` para evitar errores con Playwright.
 
 ## 📚 Documentación
 
@@ -38,6 +43,8 @@ La API estará disponible en: http://localhost:8000
 
 | Documento | Descripción | Tiempo |
 |-----------|-------------|--------|
+| **[PLAYWRIGHT_SETUP.md](PLAYWRIGHT_SETUP.md)** | 🎭 Configuración de Playwright (Windows/Linux) | 10 min |
+| **[PRODUCCION_PLAYWRIGHT.md](PRODUCCION_PLAYWRIGHT.md)** | 🚀 Despliegue en producción con Playwright | 15 min |
 | **[PASOS_INMEDIATOS.md](PASOS_INMEDIATOS.md)** | ⚡ Solución paso a paso a errores actuales | 10-15 min |
 | **[QUICK_FIX.md](QUICK_FIX.md)** | 🔧 Configuración rápida de secrets | 5 min |
 | **[SOLUCION_ERRORES_GITHUB_ACTIONS.md](SOLUCION_ERRORES_GITHUB_ACTIONS.md)** | 📖 Guía completa de troubleshooting | 20-30 min |

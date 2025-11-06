@@ -325,25 +325,31 @@ async def process_bulk_name_task(task_id: str, nuips: List[str], fecha_expedicio
                 
                 # 2. Si no se encontró en Sisben, buscar en Procuraduría
                 if not name:
-                    scraper_procuraduria = None
+                    async def fetch_procuraduria_sync():
+                        scraper_procuraduria = None
+                        try:
+                            scraper_procuraduria = ProcuraduriaScraperAuto(headless=False)
+                            result_procuraduria = await scraper_procuraduria.scrape_nuip(nuip)
+                            
+                            if result_procuraduria.get("status") == "success":
+                                extracted_name = result_procuraduria.get("name")
+                                if extracted_name and extracted_name.strip():
+                                    return extracted_name.strip(), "procuraduria", True
+                            return None, None, False
+                        except Exception as e:
+                            return None, None, False
+                        finally:
+                            if scraper_procuraduria:
+                                try:
+                                    await scraper_procuraduria.close()
+                                except:
+                                    pass
+                    
                     try:
-                        scraper_procuraduria = ProcuraduriaScraperAuto(headless=False)
-                        result_procuraduria = scraper_procuraduria.scrape_nuip(nuip)
-                        
-                        if result_procuraduria.get("status") == "success":
-                            extracted_name = result_procuraduria.get("name")
-                            if extracted_name and extracted_name.strip():
-                                name = extracted_name.strip()
-                                source = "procuraduria"
-                                success = True
+                        import asyncio
+                        name, source, success = asyncio.run(fetch_procuraduria_sync())
                     except Exception as e:
                         pass  # Continuar con la siguiente fuente
-                    finally:
-                        if scraper_procuraduria:
-                            try:
-                                scraper_procuraduria.close()
-                            except:
-                                pass
                 
                 # 3. Si no se encontró en Procuraduría y hay fecha_expedicion, buscar en Policía
                 if not name and fecha_expedicion and fecha_expedicion.strip():
