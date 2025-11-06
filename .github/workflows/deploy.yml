@@ -175,13 +175,11 @@ jobs:
               echo "   Starting uvicorn..."
               cd "$PROJECT_DIR"
               
-              # Crear script temporal para iniciar uvicorn con variables expandidas
-              cat > /tmp/start_uvicorn.sh <<EOF
-#!/bin/bash
-cd $PROJECT_DIR
-source venv/bin/activate
-exec venv/bin/uvicorn $APP_MODULE --host $HOST --port $PORT --workers $WORKERS --log-level info >> uvicorn.log 2>&1
-EOF
+              # Crear script temporal para iniciar uvicorn
+              echo '#!/bin/bash' > /tmp/start_uvicorn.sh
+              echo "cd $PROJECT_DIR" >> /tmp/start_uvicorn.sh
+              echo 'source venv/bin/activate' >> /tmp/start_uvicorn.sh
+              echo "exec venv/bin/uvicorn $APP_MODULE --host $HOST --port $PORT --workers $WORKERS --log-level info >> uvicorn.log 2>&1" >> /tmp/start_uvicorn.sh
               
               chmod +x /tmp/start_uvicorn.sh
               
