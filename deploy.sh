@@ -33,7 +33,17 @@ source "$VENV_PATH/bin/activate"
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
-# 6. Setup and restart service
+# 6. Stop nginx to free port 80
+echo "🛑 Stopping nginx to free port 80..."
+if sudo systemctl is-active --quiet nginx; then
+    sudo systemctl stop nginx
+    sudo systemctl disable nginx
+    echo "✅ Nginx stopped and disabled"
+else
+    echo "ℹ️  Nginx is not running"
+fi
+
+# 7. Setup and restart service
 echo "🔄 Setting up systemd service..."
 
 # Copy service file to systemd directory
@@ -53,11 +63,13 @@ else
     exit 1
 fi
 
-# 7. Check status
+# 8. Check status
 sleep 3
 if sudo systemctl is-active --quiet api-electoral; then
-    echo "✅ Service is running"
+    echo "✅ Service is running on port 80"
     sudo systemctl status api-electoral --no-pager -l | head -20
+    echo ""
+    echo "🌐 API accessible at: http://your-server-ip/"
 else
     echo "❌ Service failed to start"
     sudo journalctl -u api-electoral -n 30 --no-pager
