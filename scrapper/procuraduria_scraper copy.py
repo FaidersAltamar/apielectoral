@@ -135,13 +135,34 @@ class ProcuraduriaScraperAuto:
                 print(f"🔍 Consultando antecedentes para ID: {numero_id} (Intento {attempt}/{max_retries})")
                 
                 # Navegar a la página de la Procuraduría
-                url = "https://apps.procuraduria.gov.co/webcert/inicio.aspx"
+                url = "https://www.procuraduria.gov.co/Pages/Consulta-de-Antecedentes.aspx"
                 print(f"🌐 Navegando a: {url}")
                 self.driver.get(url)
                 # Esperar a que la página cargue completamente
                 self.wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
                 print("✅ Página cargada completamente")
-                time.sleep(2)
+                
+                # La página usa PowerApps embebido, esperar a que cargue
+                print("⏳ Esperando a que PowerApps cargue...")
+                time.sleep(3)
+                
+                # Buscar si hay un iframe de PowerApps
+                try:
+                    iframes = self.driver.find_elements(By.TAG_NAME, "iframe")
+                    print(f"📦 Encontrados {len(iframes)} iframes en la página")
+                    
+                    if len(iframes) > 0:
+                        # Obtener e imprimir la dirección del iframe
+                        iframe_src = iframes[0].get_attribute("src")
+                        print(f"🔗 Dirección del iframe: {iframe_src}")
+                        
+                        print("🔄 Cambiando al iframe de PowerApps...")
+                        # Cambiar al primer iframe (generalmente es el de PowerApps)
+                        self.driver.switch_to.frame(iframes[0])
+                        print("✅ Cambiado al iframe de PowerApps")
+                        time.sleep(2)  # Esperar a que cargue el contenido del iframe
+                except Exception as e:
+                    print(f"⚠️ No se pudo cambiar al iframe: {e}")
                 
                 # 1. Seleccionar tipo de documento
                 print("🔎 Buscando dropdown de tipo de documento...")
@@ -360,7 +381,8 @@ class ProcuraduriaScraperAuto:
             "¿ Cual es la Capital de Antioquia (sin tilde)? ":"Medellin",
             "¿ Cual es la Capital del Atlantico?":"Barranquilla",
             "¿ Cual es la Capital del Vallle del Cauca?":"Cali",
-            "¿Escriba los tres primeros digitos del documento a consultar?": nuip[:3]
+            "¿Escriba los tres primeros digitos del documento a consultar?": nuip[:3],
+            "¿Escriba los dos últimos digitos del documento a consultar?": nuip[-2:],            
         }
         
         # Buscar la respuesta en el diccionario (case-insensitive)
