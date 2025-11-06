@@ -826,6 +826,7 @@ async def get_solo_name_sequential(request: PeticionRequest):
     start_time = time.time()
     name = ""
     source = None
+    nuip = request.nuip
     
     print(f"\n{'='*60}")
     print(f"📥 Consultando NUIP: {nuip}")
