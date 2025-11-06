@@ -33,18 +33,6 @@ source "$VENV_PATH/bin/activate"
 pip install --upgrade pip -q
 pip install -r requirements.txt -q
 
-# 5.1 Install Playwright and browsers
-echo "🎭 Installing Playwright..."
-if ! command -v playwright &> /dev/null; then
-    pip install playwright -q
-fi
-
-echo "🌐 Installing Playwright browsers..."
-playwright install chromium
-
-echo "🔧 Installing Playwright system dependencies..."
-sudo playwright install-deps chromium || echo "⚠️  Could not install system dependencies automatically"
-
 # 6. Setup and restart service
 echo "🔄 Setting up systemd service..."
 
