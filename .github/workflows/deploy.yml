@@ -1,4 +1,4 @@
-name: Deploy to VPS
+name: Deploy FastAPI to VPS
 
 on:
   push:
@@ -9,7 +9,7 @@ on:
 
 jobs:
   deploy:
-    name: Deploy to VPS Server
+    name: Deploy FastAPI Application
     runs-on: ubuntu-latest
     
     steps:
@@ -24,163 +24,189 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           script: |
-            # Definir directorio del proyecto
-            PROJECT_DIR="/var/www/html/apielectoral/"
+            set -e  # Exit on error
             
-            # Verificar que el directorio existe
+            echo "═══════════════════════════════════════════════════════"
+            echo "🚀 FastAPI Deployment Started"
+            echo "═══════════════════════════════════════════════════════"
+            echo ""
+            
+            # Variables
+            PROJECT_DIR="/var/www/html/apielectoral/"
+            APP_NAME="api-electoral"
+            VENV_PATH="$PROJECT_DIR/venv"
+            UVICORN_CMD="$VENV_PATH/bin/uvicorn"
+            APP_MODULE="api:app"
+            HOST="0.0.0.0"
+            PORT="8000"
+            WORKERS="2"
+            
+            # 1. Validar directorio del proyecto
+            echo "📁 Step 1: Validating project directory..."
             if [ ! -d "$PROJECT_DIR" ]; then
               echo "❌ Error: Directory $PROJECT_DIR does not exist"
               exit 1
             fi
-            
-            # Navegar al directorio del proyecto
             cd "$PROJECT_DIR"
-            echo "✅ Working directory: $(pwd)"
+            echo "   ✅ Working directory: $(pwd)"
             
-            # Verificar que es un repositorio git
+            # 2. Configurar Git
+            echo ""
+            echo "🔧 Step 2: Configuring Git..."
             if [ ! -d .git ]; then
               echo "❌ Error: Not a git repository"
               exit 1
             fi
-            
-            # Configurar git safe.directory para evitar error de ownership
             git config --global --add safe.directory "$PROJECT_DIR"
-            echo "✅ Git safe directory configured"
+            echo "   ✅ Git configured"
             
-            # Verificar y corregir permisos del directorio
+            # 3. Corregir permisos
+            echo ""
+            echo "🔐 Step 3: Setting permissions..."
             sudo chown -R ubuntu:ubuntu "$PROJECT_DIR"
-            echo "✅ Directory ownership corrected"
+            echo "   ✅ Permissions set to ubuntu:ubuntu"
             
-            # Hacer backup del .env si existe
+            # 4. Backup y actualizar código
+            echo ""
+            echo "📥 Step 4: Updating code from repository..."
             if [ -f .env ]; then
               cp .env .env.backup
-              echo "✅ Backed up .env file"
-            else
-              echo "⚠️  Warning: .env file not found"
+              echo "   ✅ .env backed up"
             fi
             
-            # Pull latest changes
-            echo "📥 Pulling latest changes..."
             git pull origin main || git pull origin master
+            echo "   ✅ Code updated"
             
-            # Restaurar .env si existe el backup
             if [ -f .env.backup ]; then
               cp .env.backup .env
-              echo "✅ Restored .env file"
+              echo "   ✅ .env restored"
+            elif [ ! -f .env ] && [ -f .env.example ]; then
+              echo "   ⚠️  .env not found, please configure it"
             fi
             
-            # Limpiar venv corrupto si existe
-            if [ -d venv ] && [ ! -f venv/bin/activate ]; then
-              echo "🗑️  Removing corrupted venv..."
-              rm -rf venv
-            fi
+            # 5. Configurar Python y Virtual Environment
+            echo ""
+            echo "🐍 Step 5: Setting up Python environment..."
             
-            # Verificar e instalar python3-venv si es necesario
+            # Verificar python3-venv
             if ! dpkg -l | grep -q python3.*-venv; then
-              echo "📦 Installing python3-venv..."
+              echo "   Installing python3-venv..."
               sudo apt update -qq
-              sudo apt install -y python3-venv python3-full
+              sudo apt install -y python3-venv python3-full python3-pip
             fi
             
-            # Crear virtual environment si no existe
-            if [ ! -d venv ]; then
-              echo "📦 Creating virtual environment..."
-              python3 -m venv venv
+            # Limpiar venv corrupto
+            if [ -d "$VENV_PATH" ] && [ ! -f "$VENV_PATH/bin/activate" ]; then
+              echo "   Removing corrupted venv..."
+              rm -rf "$VENV_PATH"
+            fi
+            
+            # Crear venv si no existe
+            if [ ! -d "$VENV_PATH" ]; then
+              echo "   Creating virtual environment..."
+              python3 -m venv "$VENV_PATH"
               if [ $? -ne 0 ]; then
-                echo "❌ Failed to create venv, installing dependencies..."
                 sudo apt update -qq
                 sudo apt install -y python3-venv python3-full python3-pip
-                python3 -m venv venv
-                if [ $? -ne 0 ]; then
-                  echo "❌ Still failed, trying with sudo..."
-                  sudo python3 -m venv venv
-                  sudo chown -R ubuntu:ubuntu venv
-                fi
+                python3 -m venv "$VENV_PATH"
               fi
             fi
             
-            # Verificar que venv se creó correctamente
-            if [ ! -f venv/bin/activate ]; then
-              echo "❌ Virtual environment activation script not found"
-              echo "📋 Debugging info:"
-              echo "   Python version: $(python3 --version)"
-              echo "   Python location: $(which python3)"
-              echo "   Venv module: $(python3 -m venv --help > /dev/null 2>&1 && echo 'OK' || echo 'NOT FOUND')"
+            # Verificar venv
+            if [ ! -f "$VENV_PATH/bin/activate" ]; then
+              echo "❌ Failed to create virtual environment"
               exit 1
             fi
             
-            # Activar entorno virtual
-            source venv/bin/activate
-            echo "✅ Virtual environment activated"
-            echo "   Python: $(which python)"
-            echo "   Pip: $(which pip)"
+            # Activar venv
+            source "$VENV_PATH/bin/activate"
+            echo "   ✅ Virtual environment activated"
+            echo "      Python: $(python --version)"
+            echo "      Location: $(which python)"
             
-            # Actualizar pip
-            pip install --upgrade pip
+            # 6. Instalar dependencias
+            echo ""
+            echo "📦 Step 6: Installing dependencies..."
+            pip install --upgrade pip -q
+            pip install -r requirements.txt -q
+            echo "   ✅ Dependencies installed"
             
-            # Instalar/actualizar dependencias
-            echo "📦 Installing dependencies..."
-            pip install -r requirements.txt
+            # 7. Gestionar aplicación
+            echo ""
+            echo "🔄 Step 7: Managing application..."
             
-            # Reiniciar el servicio si existe
-            if sudo systemctl list-unit-files | grep -q "api-electoral.service"; then
-              echo "🔄 Restarting service..."
-              sudo systemctl restart api-electoral
-              sudo systemctl status api-electoral --no-pager
-            else
-              echo "⚠️  Warning: api-electoral.service not found"
-              echo "💡 You may need to set up the systemd service"
-              
-              # Intentar matar procesos existentes
-              echo "🔍 Checking for existing processes..."
-              if pgrep -f "uvicorn.*api:app" > /dev/null; then
-                echo "   Found existing uvicorn process, killing..."
-                pkill -9 -f "uvicorn.*api:app" || true
-                sleep 2
-              elif pgrep -f "python.*api.py" > /dev/null; then
-                echo "   Found existing python process, killing..."
-                pkill -9 -f "python.*api.py" || true
-                sleep 2
+            # Verificar si existe servicio systemd
+            if sudo systemctl list-unit-files | grep -q "$APP_NAME.service"; then
+              echo "   Using systemd service..."
+              sudo systemctl restart "$APP_NAME"
+              sleep 3
+              if sudo systemctl is-active --quiet "$APP_NAME"; then
+                echo "   ✅ Service restarted successfully"
+                sudo systemctl status "$APP_NAME" --no-pager -l
               else
-                echo "   No existing processes found"
-              fi
-              
-              # Iniciar aplicación en background completamente desacoplada
-              echo "🚀 Starting application with uvicorn..."
-              cd "$PROJECT_DIR"
-              
-              # Usar setsid y disown para desacoplar completamente del shell
-              setsid venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --workers 2 > app.log 2>&1 < /dev/null &
-              APP_PID=$!
-              disown
-              
-              echo "   Started with PID: $APP_PID"
-              
-              # Esperar a que inicie
-              sleep 5
-              
-              # Verificar que está corriendo (buscar por nombre ya que puede tener otro PID)
-              if pgrep -f "uvicorn.*api:app" > /dev/null; then
-                ACTUAL_PID=$(pgrep -f "uvicorn.*api:app")
-                echo "✅ Application is running (PID: $ACTUAL_PID)"
-              else
-                echo "❌ Application failed to start"
-                echo "📋 Last 30 lines of app.log:"
-                tail -30 app.log 2>/dev/null || echo "   (log file not found)"
+                echo "   ❌ Service failed to start"
+                sudo journalctl -u "$APP_NAME" -n 50 --no-pager
                 exit 1
               fi
+            else
+              echo "   ⚠️  Systemd service not found, using manual start"
               
-              # Verificar que responde
-              echo "🔍 Testing API endpoint..."
-              sleep 3
-              if curl -s http://localhost:8000/balance > /dev/null; then
-                echo "✅ API is responding"
+              # Detener procesos existentes
+              if pgrep -f "uvicorn.*$APP_MODULE" > /dev/null; then
+                echo "   Stopping existing uvicorn process..."
+                pkill -9 -f "uvicorn.*$APP_MODULE"
+                sleep 2
+              fi
+              
+              # Iniciar uvicorn
+              echo "   Starting uvicorn..."
+              cd "$PROJECT_DIR"
+              
+              # Usar setsid para crear nueva sesión y desacoplar del terminal
+              setsid "$UVICORN_CMD" "$APP_MODULE" \
+                --host "$HOST" \
+                --port "$PORT" \
+                --workers "$WORKERS" \
+                --log-level info \
+                > "$PROJECT_DIR/uvicorn.log" 2>&1 < /dev/null &
+              
+              # Desacoplar del shell
+              disown
+              
+              # Esperar inicio
+              echo "   Waiting for application to start..."
+              sleep 5
+              
+              # Verificar proceso
+              if pgrep -f "uvicorn.*$APP_MODULE" > /dev/null; then
+                PID=$(pgrep -f "uvicorn.*$APP_MODULE")
+                echo "   ✅ Uvicorn started (PID: $PID)"
               else
-                echo "⚠️  API not responding yet (may need more time to start)"
-                echo "📋 Checking app.log for errors:"
-                tail -10 app.log 2>/dev/null || echo "   (log file not found)"
+                echo "   ❌ Failed to start uvicorn"
+                echo "   Last 30 lines of log:"
+                tail -30 "$PROJECT_DIR/uvicorn.log" 2>/dev/null || echo "   (log not found)"
+                exit 1
               fi
             fi
+            
+            # 8. Verificar API
+            echo ""
+            echo "🔍 Step 8: Testing API endpoint..."
+            sleep 3
+            
+            if curl -f -s http://localhost:$PORT/balance > /dev/null 2>&1; then
+              echo "   ✅ API is responding on port $PORT"
+              RESPONSE=$(curl -s http://localhost:$PORT/balance)
+              echo "   Response: $RESPONSE"
+            else
+              echo "   ⚠️  API not responding yet"
+              echo "   This is normal, it may need more time to initialize"
+            fi
+            
+            echo ""
+            echo "═══════════════════════════════════════════════════════"
+            echo "✅ Deployment completed successfully!"
+            echo "═══════════════════════════════════════════════════════"
 
       - name: Health Check
         run: |
