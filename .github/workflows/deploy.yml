@@ -130,11 +130,43 @@ jobs:
             else
               echo "⚠️  Warning: api-electoral.service not found"
               echo "💡 You may need to set up the systemd service"
-              # Intentar matar procesos existentes y reiniciar manualmente
-              pkill -f "python.*api.py" || true
+              
+              # Intentar matar procesos existentes
+              echo "🔍 Checking for existing processes..."
+              if pgrep -f "python.*api.py" > /dev/null; then
+                echo "   Found existing process, killing..."
+                pkill -f "python.*api.py" || true
+                sleep 2
+              fi
+              
+              # Iniciar aplicación en background
               echo "🚀 Starting application in background..."
+              cd "$PROJECT_DIR"
               nohup venv/bin/python api.py > app.log 2>&1 &
-              echo "✅ Application started (PID: $!)" 
+              APP_PID=$!
+              echo "   Started with PID: $APP_PID"
+              
+              # Esperar a que inicie
+              sleep 3
+              
+              # Verificar que está corriendo
+              if ps -p $APP_PID > /dev/null 2>&1; then
+                echo "✅ Application is running (PID: $APP_PID)"
+              else
+                echo "❌ Application failed to start"
+                echo "📋 Last 20 lines of app.log:"
+                tail -20 app.log || echo "   (log file not found)"
+                exit 1
+              fi
+              
+              # Verificar que responde
+              echo "🔍 Testing API endpoint..."
+              sleep 2
+              if curl -s http://localhost:8000/balance > /dev/null; then
+                echo "✅ API is responding"
+              else
+                echo "⚠️  API not responding yet (may need more time to start)"
+              fi
             fi
 
       - name: Health Check
