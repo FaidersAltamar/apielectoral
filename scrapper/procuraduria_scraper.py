@@ -1,12 +1,11 @@
 import time
 import json
 import os
-from selenium import webdriver
+import undetected_chromedriver as uc
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from selenium.webdriver.support.ui import Select
-from selenium.webdriver.chrome.options import Options
 from selenium.common.exceptions import TimeoutException, NoSuchElementException
 from datetime import datetime
 
@@ -29,8 +28,8 @@ class ProcuraduriaScraperAuto:
         self.setup_driver(headless)
     
     def setup_driver(self, headless=False):
-        """Configura el driver de Chrome con soporte para extensiones"""
-        chrome_options = Options()
+        """Configura el driver de Chrome usando undetected_chromedriver"""
+        chrome_options = uc.ChromeOptions()
         
         if headless:
             chrome_options.add_argument("--headless=new")
@@ -41,16 +40,8 @@ class ProcuraduriaScraperAuto:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-setuid-sandbox")
-        chrome_options.add_argument("--remote-debugging-port=9222")
-        
-        # Configuraciones para evitar detección
-        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-        chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-        chrome_options.add_experimental_option('useAutomationExtension', False)
         
         # Optimizaciones de rendimiento
-        chrome_options.add_argument("--disable-extensions")
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-background-networking")
         chrome_options.add_argument("--disable-default-apps")
@@ -69,14 +60,17 @@ class ProcuraduriaScraperAuto:
                 print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
         
         try:
-            self.driver = webdriver.Chrome(options=chrome_options)
+            # Usar undetected_chromedriver en lugar de selenium estándar
+            self.driver = uc.Chrome(
+                options=chrome_options,
+                use_subprocess=True,
+                version_main=None  # Detecta automáticamente la versión de Chrome
+            )
+            print("✅ Chrome iniciado con undetected_chromedriver")
         except Exception as e:
             print(f"❌ Error al inicializar Chrome: {e}")
             print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
             raise
-        
-        # Ejecutar script para ocultar webdriver
-        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         # Configurar wait
         self.wait = WebDriverWait(self.driver, 15)
