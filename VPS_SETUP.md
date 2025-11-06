@@ -343,6 +343,73 @@ sudo systemctl restart api-electoral
 
 ## 🐛 Troubleshooting
 
+### ❌ Error: VPS_PROJECT_PATH no configurado
+Si ves `cd ***: No such file or directory`:
+
+```bash
+# En GitHub → Settings → Secrets → Actions
+# Agregar secret: VPS_PROJECT_PATH
+# Valor: /home/api_electroral (o la ruta correcta de tu proyecto)
+```
+
+### ❌ Error: externally-managed-environment
+Si ves error de Python 3.13 con PEP 668:
+
+```bash
+# Opción 1: Usar virtual environment (RECOMENDADO)
+cd /home/api_electroral
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Opción 2: Usar --break-system-packages (NO RECOMENDADO)
+pip install -r requirements.txt --break-system-packages
+```
+
+### ❌ Error: api-electoral.service not found
+Si el servicio systemd no existe:
+
+```bash
+# Crear el archivo de servicio
+sudo nano /etc/systemd/system/api-electoral.service
+```
+
+Contenido básico:
+```ini
+[Unit]
+Description=API Electoral Service
+After=network.target
+
+[Service]
+Type=simple
+User=apiuser
+WorkingDirectory=/home/api_electroral
+Environment="PATH=/home/api_electroral/venv/bin"
+ExecStart=/home/api_electroral/venv/bin/python api.py
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
+```
+
+Luego:
+```bash
+sudo systemctl daemon-reload
+sudo systemctl enable api-electoral
+sudo systemctl start api-electoral
+```
+
+### ❌ Error: .env not found
+Si el archivo .env no existe:
+
+```bash
+cd /home/api_electroral
+cp .env.example .env
+nano .env
+# Configurar las variables necesarias
+```
+
 ### Servicio no inicia
 ```bash
 # Ver logs detallados

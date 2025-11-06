@@ -24,29 +24,78 @@ jobs:
           key: ${{ secrets.VPS_SSH_KEY }}
           port: ${{ secrets.VPS_PORT || 22 }}
           script: |
-            # Navegar al directorio del proyecto
-            cd ${{ secrets.VPS_PROJECT_PATH || '/var/www/api_electroral' }}
+            # Definir directorio del proyecto
+            PROJECT_DIR="${{ secrets.VPS_PROJECT_PATH }}"
+            if [ -z "$PROJECT_DIR" ]; then
+              echo "❌ Error: VPS_PROJECT_PATH secret is not set"
+              exit 1
+            fi
             
-            # Hacer backup del .env
-            cp .env .env.backup
+            # Verificar que el directorio existe
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "❌ Error: Directory $PROJECT_DIR does not exist"
+              exit 1
+            fi
+            
+            # Navegar al directorio del proyecto
+            cd "$PROJECT_DIR"
+            echo "✅ Working directory: $(pwd)"
+            
+            # Verificar que es un repositorio git
+            if [ ! -d .git ]; then
+              echo "❌ Error: Not a git repository"
+              exit 1
+            fi
+            
+            # Hacer backup del .env si existe
+            if [ -f .env ]; then
+              cp .env .env.backup
+              echo "✅ Backed up .env file"
+            else
+              echo "⚠️  Warning: .env file not found"
+            fi
             
             # Pull latest changes
-            git pull origin main
+            echo "📥 Pulling latest changes..."
+            git pull origin main || git pull origin master
             
-            # Restaurar .env
-            cp .env.backup .env
+            # Restaurar .env si existe el backup
+            if [ -f .env.backup ]; then
+              cp .env.backup .env
+              echo "✅ Restored .env file"
+            fi
+            
+            # Crear virtual environment si no existe
+            if [ ! -d venv ]; then
+              echo "📦 Creating virtual environment..."
+              python3 -m venv venv
+            fi
             
             # Activar entorno virtual
             source venv/bin/activate
+            echo "✅ Virtual environment activated"
+            
+            # Actualizar pip
+            pip install --upgrade pip
             
             # Instalar/actualizar dependencias
+            echo "📦 Installing dependencies..."
             pip install -r requirements.txt
             
-            # Reiniciar el servicio
-            sudo systemctl restart api-electoral
-            
-            # Verificar estado
-            sudo systemctl status api-electoral --no-pager
+            # Reiniciar el servicio si existe
+            if sudo systemctl list-unit-files | grep -q "api-electoral.service"; then
+              echo "🔄 Restarting service..."
+              sudo systemctl restart api-electoral
+              sudo systemctl status api-electoral --no-pager
+            else
+              echo "⚠️  Warning: api-electoral.service not found"
+              echo "💡 You may need to set up the systemd service"
+              # Intentar matar procesos existentes y reiniciar manualmente
+              pkill -f "python.*api.py" || true
+              echo "🚀 Starting application in background..."
+              nohup venv/bin/python api.py > app.log 2>&1 &
+              echo "✅ Application started (PID: $!)" 
+            fi
 
       - name: Health Check
         run: |
