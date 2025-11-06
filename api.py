@@ -810,135 +810,108 @@ async def get_name_sequential(request: ConsultaNombreRequest):
         "results": results
     }
 
-
-@app.post("/bulk/name")
-async def create_bulk_name_task(request: BulkNameRequest, background_tasks: BackgroundTasks):
+@app.post("/consultar-solo-nombres")
+async def get_solo_name_sequential(request: PeticionRequest):
     """
-    Crea una tarea asíncrona para consultar múltiples NUIPs usando búsqueda secuencial (máximo 50)
-    Busca en orden: Sisben -> Procuraduría -> Policía (si hay fecha_expedicion)
+    Endpoint que busca nombre para un NUIP en:
+    1. Procuraduría
+    2. Sisben (si no se encontró en Procuraduría)
     
     Args:
-        request: Lista de NUIPs a consultar y fecha de expedición opcional
-        
+        nuip: Número de identificación a consultar
+    
     Returns:
-        dict: ID de la tarea creada y estado inicial
+        dict: Resultado con status y name
     """
+    start_time = time.time()
+    name = ""
+    source = None
+    
+    print(f"\n{'='*60}")
+    print(f"📥 Consultando NUIP: {nuip}")
+    print(f"{'='*60}\n")
+    
     try:
-        # Crear tarea usando el task_manager
-        result = create_task(request.nuips, task_type="name")
-        task_id = result["task_id"]
+        # 1. Buscar en Procuraduría primero
+        scraper_procuraduria = None
+        try:
+            print(f"🔍 Buscando en Procuraduría...")
+            scraper_procuraduria = ProcuraduriaScraperAuto(headless=True)
+            
+            result_procuraduria = await asyncio.wait_for(
+                asyncio.to_thread(scraper_procuraduria.scrape_nuip, request.nuip),
+                timeout=60.0
+            )
+            
+            if result_procuraduria.get("status") == "success":
+                extracted_name = result_procuraduria.get("name")
+                if extracted_name and extracted_name.strip():
+                    name = extracted_name.strip()
+                    source = "procuraduria"
+                    print(f"✅ Nombre encontrado en Procuraduría: {name}")
+        except asyncio.TimeoutError:
+            print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
+        except Exception as e:
+            print(f"⚠️ Error en Procuraduría: {e}")
+        finally:
+            if scraper_procuraduria:
+                try:
+                    scraper_procuraduria.close()
+                except Exception as close_error:
+                    print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
         
-        # Agregar tarea en segundo plano
-        background_tasks.add_task(process_bulk_name_task, task_id, request.nuips)
+        # 2. Si no se encontró en Procuraduría, buscar en Sisben
+        if not name:
+            scraper_sisben = None
+            try:
+                print(f"🔍 Buscando en Sisben...")
+                scraper_sisben = SisbenScraperAuto(headless=True)
+                
+                result_sisben = await asyncio.wait_for(
+                    asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, request.nuip),
+                    timeout=60.0
+                )
+                
+                if result_sisben.get("status") == "success":
+                    extracted_name = result_sisben.get("name")
+                    if extracted_name and extracted_name.strip():
+                        name = extracted_name.strip()
+                        source = "sisben"
+                        print(f"✅ Nombre encontrado en Sisben: {name}")
+            except asyncio.TimeoutError:
+                print(f"⏱️ Timeout en Sisben (60s excedidos)")
+            except Exception as e:
+                print(f"⚠️ Error en Sisben: {e}")
+            finally:
+                if scraper_sisben:
+                    try:
+                        scraper_sisben.close()
+                    except Exception as close_error:
+                        print(f"⚠️ Error al cerrar Sisben: {close_error}")
         
-        return result
+        response_time_seconds, execution_time = calculate_response_time(start_time)
         
+        if name:
+            return {
+                "status": "success",
+                "name": name,
+                "source": source,
+                "execution_time": execution_time
+            }
+        else:
+            return {
+                "status": "not_found",
+                "name": "",
+                "execution_time": execution_time
+            }
+            
     except Exception as e:
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": f"Error al crear la tarea: {str(e)}"
-            }
-        )
-
-@app.get("/bulk/tasks/{task_id}")
-async def get_bulk_task(task_id: str):
-    """
-    Consulta el estado y resultados de una tarea de consulta masiva (cualquier tipo)
-    
-    Args:
-        task_id: ID de la tarea a consultar
+        response_time_seconds, execution_time = calculate_response_time(start_time)
         
-    Returns:
-        dict: Estado actual de la tarea y resultados si está completada
-    """
-    # Obtener tarea usando task_manager
-    task = get_task(task_id)
-    
-    if task is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "Tarea no encontrada",
-                "task_id": task_id
-            }
-        )
-    
-    response = {
-        "task_id": task_id,
-        "task_type": task.get("task_type", "sisben"),
-        "status": task["status"],
-        "created_at": task["created_at"],
-        "started_at": task.get("started_at"),
-        "completed_at": task.get("completed_at"),
-        "total_nuips": task["total_nuips"],
-        "progress": task["progress"]
-    }
-    
-    # Si la tarea está completada, incluir los datos
-    if task["status"] == "completed":
-        response["data"] = task["data"]
-    
-    # Si la tarea falló, incluir el error
-    if task["status"] == "failed":
-        response["error"] = task.get("error")
-    
-    return response
+        return {
+            "status": "error",
+            "name": "",
+            "execution_time": execution_time,
+            "error": str(e)
+        }
 
-@app.delete("/bulk/tasks/{task_id}")
-async def delete_bulk_task(task_id: str):
-    """
-    Elimina una tarea de consulta masiva del almacenamiento (memoria y archivo)
-    
-    Args:
-        task_id: ID de la tarea a eliminar
-        
-    Returns:
-        dict: Confirmación de eliminación
-    """
-    # Obtener tarea antes de eliminar
-    task = get_task(task_id)
-    
-    if task is None:
-        raise HTTPException(
-            status_code=404,
-            detail={
-                "error": "Tarea no encontrada",
-                "task_id": task_id
-            }
-        )
-    
-    task_status = task["status"]
-    task_type = task.get("task_type", "sisben")
-    
-    # Eliminar tarea usando task_manager
-    delete_task(task_id)
-    
-    return {
-        "success": True,
-        "message": "Tarea eliminada exitosamente",
-        "task_id": task_id,
-        "task_type": task_type,
-        "previous_status": task_status
-    }
-
-@app.get("/bulk/tasks")
-async def list_bulk_tasks(task_type: Optional[str] = None):
-    """
-    Lista todas las tareas de consulta masiva guardadas
-    
-    Args:
-        task_type: Filtro opcional por tipo de tarea ("sisben", "name", o None para todas)
-    
-    Returns:
-        dict: Lista de tareas con información resumida
-    """
-    # Obtener lista de tareas usando task_manager
-    tasks_summary = list_tasks(task_type=task_type)
-    
-    return {
-        "success": True,
-        "total_tasks": len(tasks_summary),
-        "filter": task_type if task_type else "all",
-        "tasks": tasks_summary
-    }
