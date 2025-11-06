@@ -151,17 +151,36 @@ else
     exit 1
 fi
 
-# Verificar Chrome
+# Verificar y configurar Chrome con todas sus dependencias
 if command -v google-chrome &> /dev/null; then
     CHROME_VERSION=$(google-chrome --version 2>/dev/null || echo "instalado")
     success "Google Chrome: $CHROME_VERSION"
 else
     warning "Google Chrome no está instalado"
-    echo "Instalando Google Chrome..."
+    echo "Instalando Google Chrome y dependencias..."
+    
+    # Instalar dependencias del sistema para Chrome headless
+    sudo apt-get install -y \
+        wget gnupg ca-certificates \
+        fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+        libatspi2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 \
+        libgtk-3-0 libnspr4 libnss3 libwayland-client0 \
+        libxcomposite1 libxdamage1 libxfixes3 libxkbcommon0 \
+        libxrandr2 xdg-utils libu2f-udev libvulkan1 xvfb
+    
+    # Instalar Chrome
     wget -q https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb
     sudo apt install -y ./google-chrome-stable_current_amd64.deb
     rm google-chrome-stable_current_amd64.deb
-    success "Google Chrome instalado"
+    success "Google Chrome y dependencias instalados"
+fi
+
+# Verificar que Chrome funciona en modo headless
+echo "Probando Chrome en modo headless..."
+if google-chrome --headless --disable-gpu --dump-dom https://www.google.com > /dev/null 2>&1; then
+    success "Chrome headless funciona correctamente"
+else
+    warning "Chrome headless puede tener problemas. Verifica las dependencias."
 fi
 
 # Paso 7: Configurar permisos sudo
