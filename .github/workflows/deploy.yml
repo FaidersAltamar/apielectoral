@@ -151,42 +151,67 @@ jobs:
             else
               echo "   ⚠️  Systemd service not found, using manual start"
               
-              # Detener procesos existentes
+              # Detener procesos existentes de forma limpia
               if pgrep -f "uvicorn.*$APP_MODULE" > /dev/null; then
                 echo "   Stopping existing uvicorn process..."
-                pkill -9 -f "uvicorn.*$APP_MODULE"
-                sleep 2
+                OLD_PID=$(pgrep -f "uvicorn.*$APP_MODULE")
+                echo "   Old PID: $OLD_PID"
+                
+                # Intentar SIGTERM primero (graceful shutdown)
+                pkill -15 -f "uvicorn.*$APP_MODULE" 2>/dev/null || true
+                sleep 3
+                
+                # Si sigue corriendo, usar SIGKILL
+                if pgrep -f "uvicorn.*$APP_MODULE" > /dev/null; then
+                  echo "   Process still running, forcing kill..."
+                  pkill -9 -f "uvicorn.*$APP_MODULE" 2>/dev/null || true
+                  sleep 2
+                fi
+                
+                echo "   ✅ Old process stopped"
               fi
               
-              # Iniciar uvicorn
+              # Iniciar uvicorn en background completamente desacoplado
               echo "   Starting uvicorn..."
               cd "$PROJECT_DIR"
               
-              # Usar setsid para crear nueva sesión y desacoplar del terminal
-              setsid "$UVICORN_CMD" "$APP_MODULE" \
-                --host "$HOST" \
-                --port "$PORT" \
-                --workers "$WORKERS" \
-                --log-level info \
-                > "$PROJECT_DIR/uvicorn.log" 2>&1 < /dev/null &
+              # Crear script temporal para iniciar uvicorn con variables expandidas
+              cat > /tmp/start_uvicorn.sh <<EOF
+#!/bin/bash
+cd $PROJECT_DIR
+source venv/bin/activate
+exec venv/bin/uvicorn $APP_MODULE --host $HOST --port $PORT --workers $WORKERS --log-level info >> uvicorn.log 2>&1
+EOF
               
-              # Desacoplar del shell
-              disown
+              chmod +x /tmp/start_uvicorn.sh
               
-              # Esperar inicio
+              # Iniciar con nohup y setsid para desacoplar completamente
+              nohup setsid /tmp/start_uvicorn.sh > /dev/null 2>&1 &
+              
+              # Esperar a que inicie
               echo "   Waiting for application to start..."
-              sleep 5
+              sleep 8
               
               # Verificar proceso
               if pgrep -f "uvicorn.*$APP_MODULE" > /dev/null; then
                 PID=$(pgrep -f "uvicorn.*$APP_MODULE")
                 echo "   ✅ Uvicorn started (PID: $PID)"
+                
+                # Verificar que el puerto está escuchando
+                if netstat -tuln 2>/dev/null | grep -q ":$PORT " || ss -tuln 2>/dev/null | grep -q ":$PORT "; then
+                  echo "   ✅ Port $PORT is listening"
+                else
+                  echo "   ⚠️  Port $PORT not listening yet"
+                fi
               else
                 echo "   ❌ Failed to start uvicorn"
                 echo "   Last 30 lines of log:"
                 tail -30 "$PROJECT_DIR/uvicorn.log" 2>/dev/null || echo "   (log not found)"
                 exit 1
               fi
+              
+              # Limpiar script temporal
+              rm -f /tmp/start_uvicorn.sh
             fi
             
             # 8. Verificar API
