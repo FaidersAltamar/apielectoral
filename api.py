@@ -562,7 +562,10 @@ def send_voting_place_to_external_api(numero_documento: str, voting_data: dict) 
 
 async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     """
-    Procesa un solo NUIP buscando el nombre en Sisben y consultando Registraduría
+    Procesa un solo NUIP buscando el nombre en orden:
+    1. Procuraduría
+    2. Sisben (si no se encontró en Procuraduría)
+    3. Registraduría (puesto de votación)
     
     Args:
         nuip: Número de identificación a consultar
@@ -576,44 +579,75 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     source = None
     
     try:
-        # 1. Buscar en Sisben (con 1 intento y timeout)
-        max_intentos_sisben = 1
-        for intento_sisben in range(1, max_intentos_sisben + 1):
-            scraper_sisben = None
-            try:
-                print(f"🔍 Sisben - Intento {intento_sisben}/{max_intentos_sisben}")
-                scraper_sisben = SisbenScraperAuto(headless=True)
-                
-                # Usar timeout de 60 segundos para Sisben
-                result_sisben = await asyncio.wait_for(
-                    asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, nuip),
-                    timeout=60.0
-                )
-                
-                # Verificar si se encontró el nombre
-                if result_sisben.get("status") == "success":
-                    extracted_name = result_sisben.get("name")
-                    if extracted_name and extracted_name.strip():
-                        name = extracted_name.strip()
-                        source = "sisben"
-                        print(f"✅ Nombre encontrado en Sisben: {name}")
-                        break  # Salir del loop si se encontró
-            except asyncio.TimeoutError:
-                print(f"⏱️ Timeout en Sisben intento {intento_sisben} (60s excedidos)")
-            except Exception as e:
-                print(f"⚠️ Error en Sisben intento {intento_sisben}: {e}")
-            finally:
-                if scraper_sisben:
-                    try:
-                        scraper_sisben.close()
-                    except Exception as close_error:
-                        print(f"⚠️ Error al cerrar Sisben: {close_error}")
+        # 1. Buscar en Procuraduría primero
+        scraper_procuraduria = None
+        try:
+            print(f"🔍 Buscando en Procuraduría...")
+            scraper_procuraduria = ProcuraduriaScraperAuto(headless=True)
             
-            # Esperar un poco antes del siguiente intento (solo si no es el último)
-            if intento_sisben < max_intentos_sisben and not name:
-                await asyncio.sleep(2)
+            # Usar timeout de 60 segundos para Procuraduría
+            result_procuraduria = await asyncio.wait_for(
+                asyncio.to_thread(scraper_procuraduria.scrape_nuip, nuip),
+                timeout=60.0
+            )
+            
+            # Verificar si se encontró el nombre
+            if result_procuraduria.get("status") == "success":
+                extracted_name = result_procuraduria.get("name")
+                if extracted_name and extracted_name.strip():
+                    name = extracted_name.strip()
+                    source = "procuraduria"
+                    print(f"✅ Nombre encontrado en Procuraduría: {name}")
+        except asyncio.TimeoutError:
+            print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
+        except Exception as e:
+            print(f"⚠️ Error en Procuraduría: {e}")
+        finally:
+            if scraper_procuraduria:
+                try:
+                    scraper_procuraduria.close()
+                except Exception as close_error:
+                    print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
         
-        # Si ya encontró el nombre en Sisben, enviar al API y luego consultar puesto
+        # 2. Si no se encontró en Procuraduría, buscar en Sisben
+        if not name:
+            max_intentos_sisben = 1
+            for intento_sisben in range(1, max_intentos_sisben + 1):
+                scraper_sisben = None
+                try:
+                    print(f"🔍 Sisben - Intento {intento_sisben}/{max_intentos_sisben}")
+                    scraper_sisben = SisbenScraperAuto(headless=True)
+                    
+                    # Usar timeout de 60 segundos para Sisben
+                    result_sisben = await asyncio.wait_for(
+                        asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, nuip),
+                        timeout=60.0
+                    )
+                    
+                    # Verificar si se encontró el nombre
+                    if result_sisben.get("status") == "success":
+                        extracted_name = result_sisben.get("name")
+                        if extracted_name and extracted_name.strip():
+                            name = extracted_name.strip()
+                            source = "sisben"
+                            print(f"✅ Nombre encontrado en Sisben: {name}")
+                            break  # Salir del loop si se encontró
+                except asyncio.TimeoutError:
+                    print(f"⏱️ Timeout en Sisben intento {intento_sisben} (60s excedidos)")
+                except Exception as e:
+                    print(f"⚠️ Error en Sisben intento {intento_sisben}: {e}")
+                finally:
+                    if scraper_sisben:
+                        try:
+                            scraper_sisben.close()
+                        except Exception as close_error:
+                            print(f"⚠️ Error al cerrar Sisben: {close_error}")
+                
+                # Esperar un poco antes del siguiente intento (solo si no es el último)
+                if intento_sisben < max_intentos_sisben and not name:
+                    await asyncio.sleep(2)
+        
+        # 3. Si encontró el nombre (en Procuraduría o Sisben), enviar al API y luego consultar puesto
         if name:
             # 1. PRIMERO: Enviar nombre al endpoint externo (solo si enviarapi=True)
             nombre_response = {}
@@ -699,8 +733,9 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
 async def get_name_sequential(request: ConsultaNombreRequest):
     """
     Endpoint que busca nombres para múltiples NUIPs secuencialmente en:
-    1. Sisben
-    2. Registraduría (para puesto de votación)
+    1. Procuraduría
+    2. Sisben (si no se encontró en Procuraduría)
+    3. Registraduría (para puesto de votación)
     
     Si encuentra el nombre, lo envía automáticamente al endpoint externo.
     
