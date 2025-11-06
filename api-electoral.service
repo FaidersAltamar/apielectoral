@@ -1,0 +1,27 @@
+[Unit]
+Description=API Electoral - FastAPI Application
+After=network.target
+
+[Service]
+Type=simple
+User=www-data
+Group=www-data
+WorkingDirectory=/var/www/api_electroral
+Environment="PATH=/var/www/api_electroral/venv/bin"
+Environment="APIKEY_2CAPTCHA=YOUR_API_KEY_HERE"
+Environment="HEADLESS_MODE=True"
+EnvironmentFile=/var/www/api_electroral/.env
+ExecStart=/var/www/api_electroral/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=always
+RestartSec=10
+
+# Limites de recursos
+LimitNOFILE=65536
+MemoryLimit=2G
+
+# Logs
+StandardOutput=append:/var/log/api-electoral/access.log
+StandardError=append:/var/log/api-electoral/error.log
+
+[Install]
+WantedBy=multi-user.target

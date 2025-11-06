@@ -1,0 +1,68 @@
+name: Deploy to VPS
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    name: Deploy to VPS Server
+    runs-on: ubuntu-latest
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy to VPS via SSH
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USERNAME }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_PORT || 22 }}
+          script: |
+            # Navegar al directorio del proyecto
+            cd ${{ secrets.VPS_PROJECT_PATH || '/var/www/api_electroral' }}
+            
+            # Hacer backup del .env
+            cp .env .env.backup
+            
+            # Pull latest changes
+            git pull origin main
+            
+            # Restaurar .env
+            cp .env.backup .env
+            
+            # Activar entorno virtual
+            source venv/bin/activate
+            
+            # Instalar/actualizar dependencias
+            pip install -r requirements.txt
+            
+            # Reiniciar el servicio
+            sudo systemctl restart api-electoral
+            
+            # Verificar estado
+            sudo systemctl status api-electoral --no-pager
+
+      - name: Health Check
+        run: |
+          sleep 10
+          curl -f ${{ secrets.VPS_URL }}/balance || exit 1
+
+      - name: Notify Success
+        if: success()
+        run: |
+          echo "✅ Deployment to VPS successful!"
+          echo "Server: ${{ secrets.VPS_HOST }}"
+          echo "Timestamp: $(date)"
+
+      - name: Notify Failure
+        if: failure()
+        run: |
+          echo "❌ Deployment to VPS failed!"
+          echo "Check logs for details"
+          echo "Timestamp: $(date)"
