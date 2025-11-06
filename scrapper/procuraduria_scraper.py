@@ -79,7 +79,7 @@ class ProcuraduriaScraperAuto:
         self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
         
         # Configurar wait
-        self.wait = WebDriverWait(self.driver, 20)
+        self.wait = WebDriverWait(self.driver, 15)
         
         # Si hay extensión cargada, esperar un momento para que se inicialice
         if self.extension_path:
