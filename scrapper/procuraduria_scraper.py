@@ -81,6 +81,8 @@ class ProcuraduriaScraperAuto:
         chrome_options.add_argument("--mute-audio")
         chrome_options.add_argument("--no-first-run")
         chrome_options.add_argument("--safebrowsing-disable-auto-update")
+        chrome_options.add_argument("--log-level=3")
+        chrome_options.add_argument("--disable-logging")
         
         # Cargar extensión si se proporciona la ruta (solo en modo no-headless)
         if self.extension_path and not headless:
@@ -575,7 +577,9 @@ if __name__ == "__main__":
         print("\n⚠️ Proceso interrumpido por el usuario")
     except Exception as e:
         print(f"\n❌ Error crítico: {e}")
-        import traceback
-        print(f"🔍 Traceback completo: {traceback.format_exc()}")
+        DEBUG = os.getenv('DEBUG', '0') == '1'
+        if DEBUG:
+            import traceback
+            print(f"🔍 Traceback completo: {traceback.format_exc()}")
     finally:
         scraper.close()
