@@ -9,13 +9,9 @@ Group=ubuntu
 WorkingDirectory=/var/www/html/apielectoral
 Environment="PATH=/var/www/html/apielectoral/venv/bin"
 EnvironmentFile=/var/www/html/apielectoral/.env
-ExecStart=/var/www/html/apielectoral/venv/bin/uvicorn api:app --host 0.0.0.0 --port 80 --workers 2
+ExecStart=/var/www/html/apielectoral/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8080 --workers 2
 Restart=always
 RestartSec=5
-
-# Permitir bind a puerto 80 sin root
-AmbientCapabilities=CAP_NET_BIND_SERVICE
-CapabilityBoundingSet=CAP_NET_BIND_SERVICE
 
 # Limites de recursos
 LimitNOFILE=65536
