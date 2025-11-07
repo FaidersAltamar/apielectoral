@@ -1,332 +1,134 @@
 import time
 import json
 import os
-import undetected_chromedriver as uc
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+import re
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime
 
 
 class ProcuraduriaScraperAuto:
-    """Scraper automatizado para consultas de antecedentes en la Procuraduría"""
+    """Scraper automatizado para consultas de antecedentes en la Procuraduría usando BeautifulSoup"""
     
-    def __init__(self, headless=False, extension_path=None):
+    def __init__(self, api_key=None, headless=None, extension_path=None):
         """
-        Inicializa el scraper de Procuraduría
+        Inicializa el scraper de Procuraduría con requests y BeautifulSoup
         
         Args:
-            headless (bool): Si ejecutar el navegador en modo headless
-            extension_path (str): Ruta a la extensión de Chrome (opcional)
+            api_key: Parámetro ignorado (mantenido por compatibilidad con API)
+            headless: Parámetro ignorado (mantenido por compatibilidad)
+            extension_path: Parámetro ignorado (mantenido por compatibilidad)
         """
-        self.headless = headless
-        self.extension_path = extension_path
-        self.driver = None
-        self.wait = None
-        self.setup_driver(headless)
+        self.session = requests.Session()
+        self.base_url = "https://apps.procuraduria.gov.co/webcert/inicio.aspx"
+        
+        # Configurar headers para simular un navegador real
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        
+        print("✅ Scraper inicializado con requests y BeautifulSoup")
     
-    def setup_driver(self, headless=False):
-        """Configura el driver de Chrome usando undetected_chromedriver"""
-        chrome_options = uc.ChromeOptions()
-        
-        # Detectar ubicación de Chrome según el sistema operativo
-        chrome_binary = None
-        if os.name == 'nt':  # Windows
-            possible_paths = [
-                r"C:\Program Files\Google\Chrome\Application\chrome.exe",
-                r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")
-            ]
-        else:  # Linux/Unix
-            possible_paths = [
-                "/usr/bin/google-chrome",
-                "/usr/bin/google-chrome-stable",
-                "/usr/bin/chromium",
-                "/usr/bin/chromium-browser",
-                "/snap/bin/chromium",
-                "/usr/local/bin/google-chrome",
-                "/opt/google/chrome/google-chrome"
-            ]
-        
-        for path in possible_paths:
-            if os.path.exists(path):
-                chrome_binary = path
-                print(f"✅ Chrome encontrado en: {chrome_binary}")
-                break
-        
-        # Configurar binary_location si se encontró
-        if chrome_binary:
-            chrome_options.binary_location = chrome_binary
-        else:
-            print("⚠️ No se detectó Chrome automáticamente, intentando con ruta por defecto")
-        
-        if headless:
-            chrome_options.add_argument("--headless=new")
-            chrome_options.add_argument("--disable-gpu")
-            chrome_options.add_argument("--window-size=1920,1080")
-        
-        # Configuraciones críticas para producción/Linux
-        chrome_options.add_argument("--no-sandbox")
-        chrome_options.add_argument("--disable-dev-shm-usage")
-        chrome_options.add_argument("--disable-setuid-sandbox")
-        
-        # Optimizaciones de rendimiento
-        chrome_options.add_argument("--disable-software-rasterizer")
-        chrome_options.add_argument("--disable-background-networking")
-        chrome_options.add_argument("--disable-default-apps")
-        chrome_options.add_argument("--disable-sync")
-        chrome_options.add_argument("--metrics-recording-only")
-        chrome_options.add_argument("--mute-audio")
-        chrome_options.add_argument("--no-first-run")
-        chrome_options.add_argument("--safebrowsing-disable-auto-update")
-        chrome_options.add_argument("--log-level=3")
-        chrome_options.add_argument("--disable-logging")
-        
-        # Cargar extensión si se proporciona la ruta (solo en modo no-headless)
-        if self.extension_path and not headless:
-            if os.path.exists(self.extension_path):
-                chrome_options.add_argument(f"--load-extension={self.extension_path}")
-                print(f"🔌 Cargando extensión desde: {self.extension_path}")
-            else:
-                print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
-        
+    def get_page_content(self):
+        """Obtiene el contenido HTML de la página inicial"""
         try:
-            # Usar undetected_chromedriver en lugar de selenium estándar
-            self.driver = uc.Chrome(
-                options=chrome_options,
-                use_subprocess=True,
-                version_main=None  # Detecta automáticamente la versión de Chrome
-            )
-            print("✅ Chrome iniciado con undetected_chromedriver")
-        except Exception as e:
-            print(f"❌ Error al inicializar Chrome: {e}")
-            print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
-            if not chrome_binary:
-                print("⚠️ No se pudo detectar la ubicación de Chrome automáticamente")
-            raise
-        
-        # Configurar wait
-        self.wait = WebDriverWait(self.driver, 15)
-        
-        # Si hay extensión cargada, esperar un momento para que se inicialice
-        if self.extension_path:
-            print("⏳ Esperando que la extensión se inicialice...")
-            time.sleep(3)
+            print(f"🌐 Obteniendo página: {self.base_url}")
+            response = self.session.get(self.base_url, timeout=15)
+            response.raise_for_status()
+            print("✅ Página obtenida correctamente")
+            return response.text
+        except requests.RequestException as e:
+            print(f"❌ Error al obtener la página: {e}")
+            return None
     
-    def scrape_nuip(self, numero_id, max_retries=3):
-        """
-        Consulta los antecedentes en la Procuraduría con reintentos automáticos
-        
-        Args:           
-            numero_id (str): Número de identificación
-            max_retries (int): Número máximo de reintentos en caso de error
-        
-        Returns:
-            dict: Resultado de la consulta
-        """
-        start_time = time.time()
-        tipo_id = "1"
-        last_error = None
-        
-        for attempt in range(1, max_retries + 1):
-            try:
-                print(f"🔍 Consultando antecedentes para ID: {numero_id} (Intento {attempt}/{max_retries})")
-                
-                # Navegar a la página de la Procuraduría
-                url = "https://apps.procuraduria.gov.co/webcert/inicio.aspx"
-                print(f"🌐 Navegando a: {url}")
-                self.driver.get(url)
-                # Esperar a que la página cargue completamente
-                self.wait.until(lambda d: d.execute_script('return document.readyState') == 'complete')
-                print("✅ Página cargada completamente")
-                time.sleep(2)
-                
-                # 1. Seleccionar tipo de documento
-                print("🔎 Buscando dropdown de tipo de documento...")
-                tipo_doc_dropdown = self.wait.until(
-                    EC.presence_of_element_located((By.ID, "ddlTipoID"))
-                )
-                select_tipo_doc = Select(tipo_doc_dropdown)
-                select_tipo_doc.select_by_value("1")
-                print(f"✅ Tipo de documento seleccionado: {tipo_id}")
-                time.sleep(0.5)
-                
-                # 2. Llenar el campo de número de identificación
-                print("🔎 Buscando campo de número de identificación...")
-                numero_id_field = self.wait.until(
-                    EC.presence_of_element_located((By.ID, "txtNumID"))
-                )
-                numero_id_field.clear()
-                numero_id_field.send_keys(numero_id)
-                print(f"✅ Número de identificación ingresado: {numero_id}")
-                time.sleep(0.5)
-                
-                # 3. Obtener la pregunta del captcha y cambiarla si es necesario
-                print("🔎 Buscando pregunta del captcha...")
-                pregunta_element = self.wait.until(
-                    EC.presence_of_element_located((By.ID, "lblPregunta"))
-                )
-                pregunta_text = pregunta_element.text
-                print(f"❓ Pregunta captcha inicial: {pregunta_text}")
-                
-                # 4. Intentar cambiar la pregunta hasta encontrar una conocida
-                respuesta_captcha = self._resolver_pregunta_captcha(pregunta_text, numero_id)
-                max_intentos_pregunta = 10
-                intento_pregunta = 0
-                
-                while not respuesta_captcha and intento_pregunta < max_intentos_pregunta:
-                    intento_pregunta += 1
-                    print(f"🔄 Pregunta desconocida, cambiando pregunta (intento {intento_pregunta}/{max_intentos_pregunta})...")
-                    
-                    try:
-                        # Buscar el botón de refrescar/cambiar pregunta
-                        # El elemento correcto es: <input type="image" id="ImageButton1" src="Media/Image/refresh.png">
-                        refresh_selectors = [
-                            (By.ID, "ImageButton1"),  # Selector correcto del botón de refrescar
-                            (By.XPATH, "//input[@type='image' and @id='ImageButton1']"),
-                            (By.XPATH, "//input[@type='image' and contains(@src, 'refresh')]"),
-                            (By.ID, "btnRefrescarPregunta"),
-                            (By.ID, "lnkRefrescarPregunta"),
-                            (By.XPATH, "//img[contains(@src, 'refresh')]"),
-                            (By.XPATH, "//input[@type='image' and contains(@alt, 'Pregunta')]")
-                        ]
-                        
-                        refresh_clicked = False
-                        for selector_type, selector_value in refresh_selectors:
-                            try:
-                                refresh_btn = self.driver.find_element(selector_type, selector_value)
-                                refresh_btn.click()
-                                print(f"✅ Click en botón refrescar usando: {selector_value}")
-                                refresh_clicked = True
-                                time.sleep(1)  # Esperar a que cambie la pregunta
-                                break
-                            except:
-                                continue
-                        
-                        if not refresh_clicked:
-                            print("⚠️ No se encontró el botón de refrescar pregunta")
-                            break
-                        
-                        # Obtener la nueva pregunta
-                        pregunta_element = self.wait.until(
-                            EC.presence_of_element_located((By.ID, "lblPregunta"))
-                        )
-                        pregunta_text = pregunta_element.text
-                        print(f"❓ Nueva pregunta: {pregunta_text}")
-                        
-                        # Intentar resolver la nueva pregunta
-                        respuesta_captcha = self._resolver_pregunta_captcha(pregunta_text, numero_id)
-                        
-                    except Exception as e:
-                        print(f"⚠️ Error al cambiar pregunta: {e}")
-                        break
-                
-                if not respuesta_captcha:
-                    execution_time = time.time() - start_time
-                    return {
-                    "status": "error",
-                    "message": f"No se pudo resolver la pregunta del captcha: {pregunta_text}",
-                    "name": "",
-                    "tipo_id": tipo_id,
-                    "numero_id": numero_id,
-                    "pregunta_captcha": pregunta_text,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "execution_time_seconds": time.time() - start_time
-                    }
-                
-                # 5. Llenar la respuesta del captcha
-                print("🔎 Buscando campo de respuesta del captcha...")
-                respuesta_field = self.wait.until(
-                    EC.presence_of_element_located((By.ID, "txtRespuestaPregunta"))
-                )
-                respuesta_field.clear()
-                respuesta_field.send_keys(respuesta_captcha)
-                print(f"✅ Respuesta del captcha ingresada: {respuesta_captcha}")
-                time.sleep(0.5)
-                
-                # 6. Hacer clic en el botón "Consultar"
-                print("🔎 Buscando botón 'Consultar'...")
-                consultar_button = self.wait.until(
-                    EC.element_to_be_clickable((By.ID, "btnConsultar"))
-                )
-                consultar_button.click()
-                print("✅ Botón 'Consultar' clickeado")
-                
-                # 7. Esperar a que se procese la solicitud y capturar el resultado
-                # Esperar a que aparezca el resultado usando WebDriverWait
-                print("⏳ Esperando resultado...")
-                self.wait.until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "datosConsultado"))
-                )
-                time.sleep(1)  # Pequeña espera adicional para asegurar que todo cargó
+    def parse_page(self, html_content):
+        """Parsea el contenido HTML con BeautifulSoup"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup
+        except Exception as e:
+            print(f"❌ Error al parsear HTML: {e}")
+            return None
+    
+    def extract_form_data(self, soup):
+        """Extrae todos los campos hidden y viewstate del formulario ASP.NET"""
+        try:
+            form_data = {}
             
-                # 8. Extraer el nombre completo del resultado
-                nombre_completo = None
-                try:
-                    print("🔎 Buscando nombre completo en el resultado...")
-                    # Buscar el div con clase 'datosConsultado'
-                    datos_element = self.wait.until(
-                        EC.presence_of_element_located((By.CLASS_NAME, "datosConsultado"))
-                    )
-                    
-                    # Extraer los spans que contienen el nombre
-                    spans = datos_element.find_elements(By.TAG_NAME, "span")
-                    if len(spans) >= 4:
-                        # Los primeros 4 spans contienen: primer nombre, segundo nombre, primer apellido, segundo apellido
-                        nombres = [span.text.strip() for span in spans[:4] if span.text.strip()]
-                        nombre_completo = " ".join(nombres)
-                        print(f"✅ Nombre completo extraído: {nombre_completo}")
-                    else:
-                        print(f"⚠️ Se encontraron {len(spans)} spans, esperados al menos 4")
-                except Exception as e:
-                    print(f"⚠️ No se pudo extraer el nombre completo: {e}")
-                
-                execution_time = time.time() - start_time
-                
-                return {
-                    "status": "success",
-                    "message": "Consulta realizada exitosamente",
-                    "tipo_id": tipo_id,
-                    "numero_id": numero_id,
-                    "name": nombre_completo,
-                    "pregunta_captcha": pregunta_text,
-                    "respuesta_captcha": respuesta_captcha,              
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "execution_time_seconds": execution_time
-                }
-                
-            except Exception as e:
-                last_error = e
-                print(f"❌ Error en intento {attempt}: {e}")
-                
-                
-                # Verificar si hay error 404 o bloqueo
-                try:
-                    page_source = self.driver.page_source.lower()
-                    if "404" in page_source or "not found" in page_source or "access denied" in page_source:
-                        print(f"⚠️ Error 404 o acceso denegado detectado en intento {attempt}")
-                except:
-                    pass
-                
-                # Reintentar si no es el último intento
-                if attempt < max_retries:
-                    print(f"🔄 Reintentando en 3 segundos...")
-                    time.sleep(3)
-                    continue
-        
-        # Si llegamos aquí, todos los intentos fallaron
-        execution_time = time.time() - start_time
-        return {
-            "status": "error",
-            "message": f"Error después de {max_retries} intentos: {str(last_error)}",
-            "name": "",
-            "tipo_id": tipo_id,
-            "numero_id": numero_id,
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "execution_time_seconds": execution_time
-        }
+            # Buscar todos los inputs hidden (crítico para ASP.NET)
+            hidden_inputs = soup.find_all('input', type='hidden')
+            for hidden in hidden_inputs:
+                name = hidden.get('name')
+                value = hidden.get('value', '')
+                if name:
+                    form_data[name] = value
+            
+            print(f"✅ Extraídos {len(form_data)} campos del formulario")
+            return form_data
+        except Exception as e:
+            print(f"❌ Error al extraer datos del formulario: {e}")
+            return {}
+    
+    def get_captcha_question(self, soup):
+        """Extrae la pregunta del captcha desde el HTML"""
+        try:
+            # Buscar el label con id 'lblPregunta'
+            pregunta_element = soup.find('span', id='lblPregunta')
+            if pregunta_element:
+                pregunta_text = pregunta_element.get_text(strip=True)
+                print(f"❓ Pregunta captcha: {pregunta_text}")
+                return pregunta_text
+            
+            print("⚠️ No se encontró la pregunta del captcha")
+            print(f"🔍 Buscando elementos 'span' en la página...")
+            all_spans = soup.find_all('span', limit=10)
+            for i, span in enumerate(all_spans):
+                print(f"   Span {i}: id='{span.get('id')}', text='{span.get_text(strip=True)[:50]}'")
+            return None
+        except Exception as e:
+            print(f"❌ Error al extraer pregunta del captcha: {e}")
+            return None
+    
+    def refresh_captcha_question(self, form_data):
+        """Refresca la pregunta del captcha haciendo clic en el botón de refresh"""
+        try:
+            print("🔄 Refrescando pregunta del captcha...")
+            
+            # Preparar datos para el postback de ASP.NET
+            post_data = form_data.copy()
+            
+            # Simular el clic en el botón ImageButton1 (refresh)
+            post_data['__EVENTTARGET'] = 'ImageButton1'
+            post_data['__EVENTARGUMENT'] = ''
+            
+            # Actualizar headers para el POST
+            headers = self.session.headers.copy()
+            headers.update({
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://apps.procuraduria.gov.co',
+                'Referer': self.base_url
+            })
+            
+            # Enviar request
+            response = self.session.post(
+                self.base_url,
+                data=post_data,
+                headers=headers,
+                timeout=15
+            )
+            
+            response.raise_for_status()
+            print("✅ Pregunta refrescada")
+            return response.text
+            
+        except requests.RequestException as e:
+            print(f"❌ Error al refrescar pregunta: {e}")
+            return None
     
     def _resolver_pregunta_captcha(self, pregunta, nuip):
         """
@@ -334,6 +136,7 @@ class ProcuraduriaScraperAuto:
         
         Args:
             pregunta (str): Texto de la pregunta
+            nuip (str): Número de identificación para preguntas que lo requieren
         
         Returns:
             str: Respuesta a la pregunta o None si no se conoce
@@ -360,7 +163,8 @@ class ProcuraduriaScraperAuto:
             "¿ Cual es la Capital de Antioquia (sin tilde)? ":"Medellin",
             "¿ Cual es la Capital del Atlantico?":"Barranquilla",
             "¿ Cual es la Capital del Vallle del Cauca?":"Cali",
-            "¿Escriba los tres primeros digitos del documento a consultar?": nuip[:3]
+            "¿Escriba los tres primeros digitos del documento a consultar?": nuip[:3],
+            "¿Escriba los dos ultimos digitos del documento a consultar?": nuip[-2:],
         }
         
         # Buscar la respuesta en el diccionario (case-insensitive)
@@ -376,141 +180,308 @@ class ProcuraduriaScraperAuto:
         
         return None
     
-    def _capturar_resultado(self):
-        """
-        Captura el resultado de la consulta después de hacer clic en "Generar"
-        
-        Returns:
-            dict: Información del resultado capturado incluyendo el nombre
-        """
+    def submit_form(self, numero_id, respuesta_captcha, form_data):
+        """Envía el formulario de consulta con POST request"""
         try:
-            # Intentar capturar el div con clase "datosConsultado" que contiene el nombre
+            print("📤 Enviando formulario de consulta...")
+            
+            # Preparar datos del formulario
+            post_data = form_data.copy()
+            post_data.update({
+                'ddlTipoID': '1',  # Cédula de ciudadanía
+                'txtNumID': str(numero_id),
+                'txtRespuestaPregunta': str(respuesta_captcha),
+                'btnConsultar': 'Consultar',
+                '__EVENTTARGET': '',
+                '__EVENTARGUMENT': ''
+            })
+            
+            print(f"🔍 Datos del formulario a enviar:")
+            print(f"   - Tipo ID: 1")
+            print(f"   - Número ID: {numero_id}")
+            print(f"   - Respuesta Captcha: {respuesta_captcha}")
+            
+            # Actualizar headers para el POST
+            headers = self.session.headers.copy()
+            headers.update({
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://apps.procuraduria.gov.co',
+                'Referer': self.base_url
+            })
+            
+            # Enviar formulario
+            print("⏳ Enviando POST request y esperando respuesta del servidor...")
+            response = self.session.post(
+                self.base_url,
+                data=post_data,
+                headers=headers,
+                timeout=30  # Aumentado a 30 segundos para dar más tiempo
+            )
+            
+            response.raise_for_status()
+            print("✅ Respuesta recibida del servidor")
+            
+            # Esperar 5 segundos adicionales por si acaso
+            print("⏳ Esperando 5 segundos adicionales...")
+            time.sleep(5)
+            print(f"🔍 Status Code: {response.status_code}")
+            print(f"🔍 Longitud de respuesta: {len(response.text)} caracteres")
+            print(f"\n{'='*80}")
+            print("📄 CONTENIDO HTML RECIBIDO DESPUÉS DE PRESIONAR 'Consultar':")
+            print(f"{'='*80}")
+            print(f"\n🔍 Primeros 1000 caracteres:")
+            print(response.text[:1000])
+            print(f"\n{'='*80}")
+            print(f"🔍 Últimos 1000 caracteres:")
+            print(response.text[-1000:])
+            print(f"{'='*80}\n")
+            
+            return response.text
+            
+        except requests.RequestException as e:
+            print(f"❌ Error al enviar formulario: {e}")
+            return None
+    
+    def extract_result_data(self, html_content):
+        """Extrae los datos del resultado de la consulta"""
+        try:
+            print("📊 Extrayendo datos del resultado...")
+            print(f"🔍 Longitud del HTML recibido: {len(html_content)} caracteres")
+            
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Buscar el div con clase 'datosConsultado'
+            datos_element = soup.find('div', class_='datosConsultado')
+            
+            if not datos_element:
+                print("⚠️ No se encontró el elemento 'datosConsultado'")
+                print(f"🔍 Primeros 500 caracteres del HTML:")
+                print(html_content[:500])
+                print(f"\n🔍 Últimos 500 caracteres del HTML:")
+                print(html_content[-500:])
+                print(f"\n🔍 Buscando divs con clase...")
+                all_divs = soup.find_all('div', class_=True, limit=10)
+                for i, div in enumerate(all_divs):
+                    print(f"   Div {i}: class='{div.get('class')}', text='{div.get_text(strip=True)[:50]}'")
+                return None
+            
+            # Extraer el texto completo
+            texto_completo = datos_element.get_text(strip=True)
+            print(f"📄 Texto completo capturado ({len(texto_completo)} caracteres):")
+            print(f"   {texto_completo}")
+            print(f"\n🔍 HTML del elemento 'datosConsultado':")
+            print(f"   {datos_element.prettify()[:500]}")
+            
+            # Extraer los spans que contienen el nombre
             nombre_completo = None
             try:
-                # Aumentar el timeout específicamente para este elemento crítico
-                wait_resultado = WebDriverWait(self.driver, 30)
-                datos_element = wait_resultado.until(
-                    EC.presence_of_element_located((By.CLASS_NAME, "datosConsultado"))
-                )
+                spans = datos_element.find_all('span')
+                print(f"🔍 Encontrados {len(spans)} spans en 'datosConsultado'")
+                for i, span in enumerate(spans[:10]):
+                    print(f"   Span {i}: '{span.get_text(strip=True)}'")
                 
-                # Extraer el texto completo
-                texto_completo = datos_element.text
-                print(f"📄 Texto capturado: {texto_completo}")
-                
-                # Extraer los spans que contienen el nombre
-                try:
-                    spans = datos_element.find_elements(By.TAG_NAME, "span")
-                    if len(spans) >= 4:
-                        # Los primeros 4 spans contienen: primer nombre, segundo nombre, primer apellido, segundo apellido
-                        nombres = [span.text.strip() for span in spans[:4] if span.text.strip()]
-                        nombre_completo = " ".join(nombres)
-                        print(f"✅ Nombre extraído: {nombre_completo}")
-                except Exception as e:
-                    print(f"⚠️ Error extrayendo spans del nombre: {e}")
-                
-                # Buscar si tiene o no antecedentes en el texto
-                texto_lower = texto_completo.lower()
-                if "no registra antecedentes" in texto_lower or "no tiene antecedentes" in texto_lower:
-                    estado_antecedentes = "sin_antecedentes"
-                    mensaje = "La persona no registra antecedentes"
-                elif "registra antecedentes" in texto_lower or "tiene antecedentes" in texto_lower:
-                    estado_antecedentes = "con_antecedentes"
-                    mensaje = "La persona registra antecedentes"
+                if len(spans) >= 4:
+                    # Los primeros 4 spans contienen: primer nombre, segundo nombre, primer apellido, segundo apellido
+                    nombres = [span.get_text(strip=True) for span in spans[:4] if span.get_text(strip=True)]
+                    nombre_completo = " ".join(nombres)
+                    print(f"✅ Nombre extraído: {nombre_completo}")
                 else:
-                    estado_antecedentes = "consultado"
-                    mensaje = "Consulta realizada exitosamente"
-                
-                return {
-                    "tipo": estado_antecedentes,
-                    "mensaje": mensaje,
-                    "nombre_completo": nombre_completo,
-                    "texto_completo": texto_completo
-                }
-                    
-            except TimeoutException as te:
-                print(f"⚠️ No se encontró el elemento datosConsultado después de 30 segundos: {te}")
-                
-                # Intentar buscar elementos alternativos
-                try:
-                    # Buscar cualquier div con información de resultado
-                    resultado_alt = self.driver.find_elements(By.CLASS_NAME, "resultado")
-                    if resultado_alt:
-                        print(f"✅ Encontrado elemento alternativo 'resultado': {len(resultado_alt)} elementos")
-                    
-                    # Imprimir el título de la página actual
-                    print(f"📄 Título de la página: {self.driver.title}")
-                    
-                    # Buscar mensajes de error en la página
-                    error_elements = self.driver.find_elements(By.CLASS_NAME, "error")
-                    if error_elements:
-                        print(f"❌ Encontrados {len(error_elements)} elementos de error")
-                        for err in error_elements:
-                            print(f"   - {err.text}")
-                except Exception as e:
-                    print(f"⚠️ No se encontraron elementos alternativos: {e}")
-
-            # Capturar el HTML completo de la página de resultado
-            page_source = self.driver.page_source
+                    print(f"⚠️ Se esperaban al menos 4 spans, se encontraron {len(spans)}")
+            except Exception as e:
+                print(f"⚠️ Error extrayendo nombre: {e}")
             
-            # Buscar mensajes comunes de resultado
-            if "No tiene antecedentes" in page_source or "no registra antecedentes" in page_source.lower():
-                return {
-                    "tipo": "sin_antecedentes",
-                    "mensaje": "La persona no registra antecedentes",
-                    "nombre_completo": nombre_completo
-                }
-            elif "tiene antecedentes" in page_source.lower():
-                return {
-                    "tipo": "con_antecedentes",
-                    "mensaje": "La persona registra antecedentes",
-                    "nombre_completo": nombre_completo
-                }
+            # Determinar si tiene antecedentes
+            texto_lower = texto_completo.lower()
+            if "no registra antecedentes" in texto_lower or "no tiene antecedentes" in texto_lower:
+                estado_antecedentes = "sin_antecedentes"
+                mensaje = "La persona no registra antecedentes"
+            elif "registra antecedentes" in texto_lower or "tiene antecedentes" in texto_lower:
+                estado_antecedentes = "con_antecedentes"
+                mensaje = "La persona registra antecedentes"
             else:
+                estado_antecedentes = "consultado"
+                mensaje = "Consulta realizada exitosamente"
+            
+            return {
+                "tipo": estado_antecedentes,
+                "mensaje": mensaje,
+                "nombre_completo": nombre_completo,
+                "texto_completo": texto_completo
+            }
+            
+        except Exception as e:
+            print(f"❌ Error al extraer datos del resultado: {e}")
+            return None
+    
+    def scrape_nuip(self, numero_id, max_retries=3):
+        """
+        Consulta los antecedentes en la Procuraduría con reintentos automáticos
+        
+        Args:           
+            numero_id (str): Número de identificación
+            max_retries (int): Número máximo de reintentos en caso de error
+        
+        Returns:
+            dict: Resultado de la consulta
+        """
+        start_time = time.time()
+        tipo_id = "1"
+        last_error = None
+        
+        for attempt in range(1, max_retries + 1):
+            try:
+                print(f"\n{'='*50}")
+                print(f"🔍 Consultando antecedentes para ID: {numero_id} (Intento {attempt}/{max_retries})")
+                print(f"{'='*50}")
+                
+                # 1. Obtener página inicial
+                html_content = self.get_page_content()
+                if not html_content:
+                    raise Exception("Error al obtener la página inicial")
+                
+                # 2. Parsear página
+                soup = self.parse_page(html_content)
+                if not soup:
+                    raise Exception("Error al parsear la página")
+                
+                # 3. Extraer datos del formulario (ViewState, etc.)
+                form_data = self.extract_form_data(soup)
+                
+                # 4. Obtener pregunta del captcha
+                pregunta_text = self.get_captcha_question(soup)
+                if not pregunta_text:
+                    raise Exception("No se pudo obtener la pregunta del captcha")
+                
+                # 5. Intentar resolver la pregunta o cambiarla
+                respuesta_captcha = self._resolver_pregunta_captcha(pregunta_text, numero_id)
+                max_intentos_pregunta = 10
+                intento_pregunta = 0
+                
+                while not respuesta_captcha and intento_pregunta < max_intentos_pregunta:
+                    intento_pregunta += 1
+                    print(f"🔄 Pregunta desconocida, cambiando pregunta (intento {intento_pregunta}/{max_intentos_pregunta})...")
+                    
+                    # Refrescar pregunta
+                    new_html = self.refresh_captcha_question(form_data)
+                    if not new_html:
+                        print("⚠️ No se pudo refrescar la pregunta")
+                        break
+                    
+                    # Parsear nueva página
+                    soup = self.parse_page(new_html)
+                    if not soup:
+                        break
+                    
+                    # Actualizar form_data con los nuevos valores
+                    form_data = self.extract_form_data(soup)
+                    
+                    # Obtener nueva pregunta
+                    pregunta_text = self.get_captcha_question(soup)
+                    if not pregunta_text:
+                        break
+                    
+                    # Intentar resolver la nueva pregunta
+                    respuesta_captcha = self._resolver_pregunta_captcha(pregunta_text, numero_id)
+                
+                if not respuesta_captcha:
+                    execution_time = time.time() - start_time
+                    return {
+                        "status": "error",
+                        "message": f"No se pudo resolver la pregunta del captcha: {pregunta_text}",
+                        "name": "",
+                        "tipo_id": tipo_id,
+                        "numero_id": numero_id,
+                        "pregunta_captcha": pregunta_text,
+                        "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                        "execution_time_seconds": execution_time
+                    }
+                
+                print(f"✅ Captcha resuelto: {respuesta_captcha}")
+                
+                # 6. Enviar formulario
+                response_html = self.submit_form(numero_id, respuesta_captcha, form_data)
+                if not response_html:
+                    raise Exception("Error al enviar formulario")
+                
+                # 7. Extraer datos del resultado
+                result_data = self.extract_result_data(response_html)
+                
+                if not result_data:
+                    raise Exception("No se pudieron extraer los datos del resultado")
+                
+                execution_time = time.time() - start_time
+                
                 return {
-                    "tipo": "desconocido",
-                    "mensaje": "No se pudo determinar el resultado",
-                    "page_title": self.driver.title,
-                    "nombre_completo": nombre_completo
+                    "status": "success",
+                    "message": result_data["mensaje"],
+                    "tipo_id": tipo_id,
+                    "numero_id": numero_id,
+                    "name": result_data.get("nombre_completo"),
+                    "estado_antecedentes": result_data["tipo"],
+                    "pregunta_captcha": pregunta_text,
+                    "respuesta_captcha": respuesta_captcha,
+                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                    "execution_time_seconds": execution_time
                 }
                 
-        except Exception as e:
-            print(f"⚠️ Error al capturar resultado: {e}")
-            return {
-                "tipo": "error",
-                "mensaje": f"Error al capturar resultado: {str(e)}"
-            }
+            except Exception as e:
+                last_error = e
+                print(f"❌ Error en intento {attempt}: {e}")
+                
+                # Reintentar si no es el último intento
+                if attempt < max_retries:
+                    print(f"🔄 Reintentando en 3 segundos...")
+                    time.sleep(3)
+                    continue
+        
+        # Si llegamos aquí, todos los intentos fallaron
+        execution_time = time.time() - start_time
+        return {
+            "status": "error",
+            "message": f"Error después de {max_retries} intentos: {str(last_error)}",
+            "name": "",
+            "tipo_id": tipo_id,
+            "numero_id": numero_id,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "execution_time_seconds": execution_time
+        }
     
-    def scrape_multiple_antecedentes(self, queries, delay=5):
+    def scrape_multiple_nuips(self, nuips_list, delay=5):
         """
-        Consulta múltiples antecedentes
+        Consulta múltiples NUIPs con delay entre consultas
         
         Args:
-            queries (list): Lista de diccionarios con 'tipo_id' y 'numero_id'
+            nuips_list (list): Lista de números de identificación
             delay (int): Segundos de espera entre consultas
         
         Returns:
             list: Lista de resultados
         """
         results = []
-        total = len(queries)
+        total = len(nuips_list)
         
-        for i, query in enumerate(queries):
-            print(f"\n📋 Procesando consulta {i+1}/{total}")
-            result = self.scrape_antecedentes(query["tipo_id"], query["numero_id"])
+        print(f"\n🚀 INICIANDO CONSULTA MASIVA DE {total} NUIPs")
+        print(f"Delay entre consultas: {delay} segundos")
+        
+        for i, nuip in enumerate(nuips_list, 1):
+            print(f"\n📋 Procesando {i}/{total}: {nuip}")
+            
+            result = self.scrape_nuip(nuip)
             results.append(result)
             
-            # Delay entre consultas si no es la última
-            if i < total - 1:
+            # Delay entre consultas (excepto en la última)
+            if i < total:
                 print(f"⏳ Esperando {delay} segundos antes de la siguiente consulta...")
                 time.sleep(delay)
         
+        print(f"\n🎉 CONSULTA MASIVA COMPLETADA: {total} NUIPs procesados")
         return results
     
     def close(self):
-        """Cierra el navegador"""
-        if self.driver:
-            self.driver.quit()
-            print("🔒 Navegador cerrado")
+        """Cierra la sesión"""
+        if self.session:
+            self.session.close()
+            print("🔒 Sesión cerrada")
 
 
 def save_procuraduria_results(data, filename=None):
@@ -544,11 +515,12 @@ def save_procuraduria_results(data, filename=None):
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    scraper = ProcuraduriaScraperAuto(headless=False)
+    scraper = ProcuraduriaScraperAuto()
     
     try:
-        # Ejemplo de consulta con cédula de ciudadanía (tipo_id = 1)
-        resultado = scraper.scrape_antecedentes("1", "1102877148")
+        # Ejemplo de consulta con cédula de ciudadanía
+        nuip_ejemplo = "1102877148"
+        resultado = scraper.scrape_nuip(nuip_ejemplo)
         
         print(f"\n📊 RESULTADO FINAL:")
         print(json.dumps(resultado, indent=2, ensure_ascii=False))
@@ -556,13 +528,16 @@ if __name__ == "__main__":
         # Guardar resultado
         save_procuraduria_results(resultado)
         
+        # Ejemplo 2: Consultar múltiples NUIPs (descomentar para usar)
+        # nuips_lista = ["1102877148", "1234567890", "9876543210"]
+        # resultados = scraper.scrape_multiple_nuips(nuips_lista, delay=5)
+        # save_procuraduria_results(resultados, "resultados_multiples.json")
+        
     except KeyboardInterrupt:
         print("\n⚠️ Proceso interrumpido por el usuario")
     except Exception as e:
         print(f"\n❌ Error crítico: {e}")
-        DEBUG = os.getenv('DEBUG', '0') == '1'
-        if DEBUG:
-            import traceback
-            print(f"🔍 Traceback completo: {traceback.format_exc()}")
+        import traceback
+        print(f"🔍 Traceback completo: {traceback.format_exc()}")
     finally:
         scraper.close()

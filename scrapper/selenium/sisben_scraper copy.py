@@ -1,121 +1,108 @@
 import time
 import json
 import os
-import requests
-from bs4 import BeautifulSoup
+import undetected_chromedriver as uc
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
 
 class SisbenScraperAuto:
-    """Scraper automatizado para consultas de nombres en el sistema SISBEN usando requests y BeautifulSoup"""
+    """Scraper automatizado para consultas de nombres en el sistema de la Policía Nacional"""
     
-    def __init__(self, headless=None, extension_path=None):
+    def __init__(self, headless=False, extension_path=None):
         """
-        Inicializa el scraper de Sisben con requests y BeautifulSoup
+        Inicializa el scraper de Sisben
         
         Args:
-            headless: Parámetro ignorado (mantenido por compatibilidad)
-            extension_path: Parámetro ignorado (mantenido por compatibilidad)
+            headless (bool): Si ejecutar el navegador en modo headless
+            extension_path (str): Ruta a la extensión de Chrome (opcional)
         """
-        self.session = requests.Session()
-        self.base_url = "https://reportes.sisben.gov.co/dnp_sisbenconsulta"
+        self.headless = headless
+        self.extension_path = extension_path
+        self.driver = None
+        self.wait = None
+        self.setup_driver(headless)
+    
+    def setup_driver(self, headless=False):
+        """Configura el driver de Chrome con soporte para extensiones"""
+        chrome_options = uc.ChromeOptions()
         
-        # Configurar headers para simular un navegador real
-        self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
-            'Accept-Encoding': 'gzip, deflate, br',
-            'Connection': 'keep-alive',
-            'Upgrade-Insecure-Requests': '1'
-        })
+        if headless:
+            chrome_options.add_argument("--headless=new")
+            chrome_options.add_argument("--disable-gpu")
+            chrome_options.add_argument("--window-size=1920,1080")
         
-        print("✅ Scraper inicializado con requests y BeautifulSoup")
-    
-    def get_page_content(self):
-        """Obtiene el contenido HTML de la página inicial"""
+        # Configuraciones críticas para producción/Linux
+        chrome_options.add_argument("--no-sandbox")
+        chrome_options.add_argument("--disable-dev-shm-usage")
+        chrome_options.add_argument("--disable-setuid-sandbox")
+        # REMOVIDO: --remote-debugging-port=9222 (causa conflictos con múltiples instancias)
+        
+        # Configuración de directorios para headless (Fix DevToolsActivePort error)
+        chrome_options.add_argument(f"--user-data-dir=/tmp/chrome-user-data-{os.getpid()}")
+        chrome_options.add_argument("--crash-dumps-dir=/tmp")
+        
+        # Argumentos adicionales para estabilidad en producción
+        chrome_options.add_argument("--disable-software-rasterizer")
+        chrome_options.add_argument("--disable-features=VizDisplayCompositor")
+        # REMOVIDO: --single-process (incompatible con --no-sandbox en Linux)
+        chrome_options.add_argument("--disable-web-security")
+        chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
+        chrome_options.add_argument("--ignore-certificate-errors")
+        
+        # Configuraciones para evitar detección
+        chrome_options.add_argument("--disable-blink-features=AutomationControlled")
+        chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+        # NOTA: undetected-chromedriver maneja automáticamente la evasión de detección
+        
+        # Optimizaciones de rendimiento
+        chrome_options.add_argument("--disable-extensions")
+        # REMOVIDO: --disable-software-rasterizer (duplicado arriba)
+        chrome_options.add_argument("--disable-background-networking")
+        chrome_options.add_argument("--disable-default-apps")
+        chrome_options.add_argument("--disable-sync")
+        chrome_options.add_argument("--metrics-recording-only")
+        chrome_options.add_argument("--mute-audio")
+        chrome_options.add_argument("--no-first-run")
+        chrome_options.add_argument("--safebrowsing-disable-auto-update")
+        
+        # Cargar extensión si se proporciona la ruta (solo en modo no-headless)
+        if self.extension_path and not headless:
+            if os.path.exists(self.extension_path):
+                chrome_options.add_argument(f"--load-extension={self.extension_path}")
+                print(f"🔌 Cargando extensión desde: {self.extension_path}")
+            else:
+                print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
+        
         try:
-            print(f"🌐 Obteniendo página: {self.base_url}")
-            response = self.session.get(self.base_url, timeout=15)
-            response.raise_for_status()
-            print("✅ Página obtenida correctamente")
-            return response.text
-        except requests.RequestException as e:
-            print(f"❌ Error al obtener la página: {e}")
-            return None
-    
-    def parse_page(self, html_content):
-        """Parsea el contenido HTML con BeautifulSoup"""
-        try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            return soup
-        except Exception as e:
-            print(f"❌ Error al parsear HTML: {e}")
-            return None
-    
-    def extract_form_data(self, soup):
-        """Extrae todos los campos hidden y viewstate del formulario"""
-        try:
-            form_data = {}
-            
-            # Buscar todos los inputs hidden
-            hidden_inputs = soup.find_all('input', type='hidden')
-            for hidden in hidden_inputs:
-                name = hidden.get('name')
-                value = hidden.get('value', '')
-                if name:
-                    form_data[name] = value
-            
-            print(f"✅ Extraídos {len(form_data)} campos del formulario")
-            return form_data
-        except Exception as e:
-            print(f"❌ Error al extraer datos del formulario: {e}")
-            return {}
-    
-    def submit_form(self, nuip, form_data):
-        """Envía el formulario de consulta con POST request"""
-        try:
-            print("📤 Enviando formulario de consulta...")
-            
-            # Preparar datos del formulario
-            post_data = form_data.copy()
-            post_data.update({
-                'TipoID': '3',  # Tipo de documento
-                'documento': str(nuip),
-                'botonenvio': 'Consultar'
-            })
-            
-            print(f"🔍 Datos del formulario a enviar:")
-            print(f"   - Tipo ID: 3")
-            print(f"   - NUIP: {nuip}")
-            
-            # Actualizar headers para el POST
-            headers = self.session.headers.copy()
-            headers.update({
-                'Content-Type': 'application/x-www-form-urlencoded',
-                'Origin': 'https://reportes.sisben.gov.co',
-                'Referer': self.base_url
-            })
-            
-            # Enviar formulario
-            print("⏳ Enviando POST request y esperando respuesta del servidor...")
-            response = self.session.post(
-                self.base_url,
-                data=post_data,
-                headers=headers,
-                timeout=30
+            # Usar undetected_chromedriver para mejor compatibilidad en Linux
+            self.driver = uc.Chrome(
+                options=chrome_options,
+                use_subprocess=True,
+                version_main=None  # Detecta automáticamente la versión de Chrome
             )
-            
-            response.raise_for_status()
-            print("✅ Respuesta recibida del servidor")
-            
-            # Esperar un momento adicional
-            time.sleep(2)
-            
-            return response.text
-            
-        except requests.RequestException as e:
-            print(f"❌ Error al enviar formulario: {e}")
-            return None
+            print("✅ Chrome iniciado con undetected_chromedriver")
+        except Exception as e:
+            print(f"❌ Error al inicializar Chrome: {e}")
+            print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
+            raise
+        
+        # Ejecutar script para ocultar webdriver
+        self.driver.execute_script("Object.defineProperty(navigator, 'webdriver', {get: () => undefined})")
+        
+        # Configurar wait
+        self.wait = WebDriverWait(self.driver, 15)
+        
+        # Si hay extensión cargada, esperar un momento para que se inicialice
+        if self.extension_path:
+            print("⏳ Esperando que la extensión se inicialice...")
+            time.sleep(3)
     
     def scrape_name_by_nuip(self, nuip, max_retries=3):
         """
@@ -123,7 +110,7 @@ class SisbenScraperAuto:
         
         Args:
             nuip (str): Número único de identificación personal
-            max_retries (int): Número máximo de reintentos en caso de error
+            max_retries (int): Número máximo de reintentos en caso de error 404
         
         Returns:
             dict: Resultado de la consulta
@@ -133,17 +120,17 @@ class SisbenScraperAuto:
         
         for attempt in range(1, max_retries + 1):
             try:
-                print(f"\n{'='*50}")
                 print(f"🔍 Consultando nombre para NUIP: {nuip} (Intento {attempt}/{max_retries})")
-                print(f"{'='*50}")
                 
-                # 1. Obtener página inicial
-                html_content = self.get_page_content()
-                if not html_content:
-                    raise Exception("Error al obtener la página inicial")
+                # Navegar directamente al iframe que contiene el formulario
+                url = "https://reportes.sisben.gov.co/dnp_sisbenconsulta"
+                
+                print("🌐 Navegando directamente al formulario del SISBEN...")
+                self.driver.get(url)
                 
                 # Verificar si hay error 404
-                if "404" in html_content.lower() or "not found" in html_content.lower():
+                page_source = self.driver.page_source.lower()
+                if "404" in page_source or "not found" in page_source or "página no encontrada" in page_source:
                     print(f"⚠️ Error 404 detectado en intento {attempt}")
                     if attempt < max_retries:
                         print(f"🔄 Reintentando en 2 segundos...")
@@ -152,21 +139,49 @@ class SisbenScraperAuto:
                     else:
                         raise Exception("Error 404: Página no encontrada después de múltiples intentos")
                 
-                # 2. Parsear página
-                soup = self.parse_page(html_content)
-                if not soup:
-                    raise Exception("Error al parsear la página")
+                # Esperar a que la página cargue completamente
+                print("⏳ Esperando carga completa del formulario...")
+                time.sleep(2)
                 
-                # 3. Extraer datos del formulario
-                form_data = self.extract_form_data(soup)
+                # 1. Seleccionar tipo de documento (value 3)
+                tipo_doc_dropdown = self.wait.until(
+                    EC.presence_of_element_located((By.ID, "TipoID"))
+                )
+                select_tipo_doc = Select(tipo_doc_dropdown)
+                select_tipo_doc.select_by_value("3")
+                print("✅ Tipo de documento seleccionado (value 3)")
+                time.sleep(0.3)
                 
-                # 4. Enviar formulario
-                response_html = self.submit_form(nuip, form_data)
-                if not response_html:
-                    raise Exception("Error al enviar formulario")
+                # 2. Llenar el campo NUIP
+                nuip_field = self.wait.until(
+                    EC.presence_of_element_located((By.ID, "documento"))
+                )
+                nuip_field.click()
+                nuip_field.clear()
+                nuip_field.send_keys(nuip)
+                print(f"✅ NUIP ingresado: {nuip}")
+                time.sleep(0.3)
                 
-                # 5. Extraer el nombre del resultado
-                nombre = self._extract_full_name(response_html)
+                # 3. Hacer clic en el botón de consultar
+                consultar_btn = self.wait.until(
+                    EC.element_to_be_clickable((By.ID, "botonenvio"))
+                )
+                consultar_btn.click()
+                print("✅ Botón de consultar presionado")
+                
+                # 4. Esperar resultados con espera explícita
+                try:
+                    # Esperar a que aparezcan los elementos de resultado
+                    WebDriverWait(self.driver, 10).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, "p.campo1.pt-1.pl-2.font-weight-bold"))
+                    )
+                    time.sleep(0.5)  # Pequeña espera adicional para estabilidad
+                except TimeoutException:
+                    print("⚠️ Timeout esperando resultados")
+                    time.sleep(1)
+                
+                # 5. Extraer el nombre
+                nombre = self._extract_full_name()
                 
                 if nombre:
                     execution_time = time.time() - start_time
@@ -184,7 +199,7 @@ class SisbenScraperAuto:
                     # No se encontró nombre, reintentar si es posible
                     if attempt < max_retries:
                         print(f"⚠️ No se encontró nombre en intento {attempt}, reintentando...")
-                        time.sleep(2)
+                        time.sleep(1)
                         continue
                     else:
                         execution_time = time.time() - start_time
@@ -201,10 +216,11 @@ class SisbenScraperAuto:
                 last_error = e
                 print(f"❌ Error en intento {attempt}: {e}")
                 
+                
                 # Reintentar si no es el último intento
                 if attempt < max_retries:
-                    print(f"🔄 Reintentando en 3 segundos...")
-                    time.sleep(3)
+                    print(f"🔄 Reintentando en 2 segundos...")
+                    time.sleep(2)
                     continue
         
         # Si llegamos aquí, todos los intentos fallaron
@@ -218,49 +234,47 @@ class SisbenScraperAuto:
             "execution_time_seconds": round(execution_time, 2)
         }
     
-    def _extract_full_name(self, html_content):
+    def _extract_full_name(self):
         """
         Extrae el nombre completo de las etiquetas HTML del SISBEN
-        
-        Args:
-            html_content (str): Contenido HTML de la respuesta
         
         Returns:
             str: Nombre completo o None si no se encuentra
         """
         try:
-            soup = BeautifulSoup(html_content, 'html.parser')
-            
             # Primero verificar si aparece el modal de "NO se encuentra en la base"
-            swal_content = soup.find('div', id='swal2-content')
-            if swal_content:
-                content_text = swal_content.get_text(strip=True)
+            try:
+                # Buscar el modal de SweetAlert2
+                swal_container = self.driver.find_element(By.CSS_SELECTOR, "div.swal2-container.swal2-center.swal2-backdrop-show")
+                
+                # Verificar si el contenido indica que NO se encuentra
+                swal_content = self.driver.find_element(By.ID, "swal2-content")
+                content_text = swal_content.text.strip()
+                
                 # Si el texto contiene "NO se encuentra", retornar None
                 if "NO" in content_text and "se encuentra en la base" in content_text:
                     print(f"⚠️ Persona NO encontrada en la base del Sisbén IV")
                     return None
+                    
+            except NoSuchElementException:
+                # No hay modal de error, continuar con la extracción normal
+                pass
             
             # Buscar todos los elementos con clase 'campo1' que contienen el nombre
-            name_elements = soup.find_all('p', class_='campo1 pt-1 pl-2 font-weight-bold')
-            
-            # También buscar con selector más flexible
-            if not name_elements:
-                name_elements = soup.find_all('p', class_=lambda x: x and 'campo1' in x)
+            name_elements = self.driver.find_elements(By.CSS_SELECTOR, "p.campo1.pt-1.pl-2.font-weight-bold")
             
             if len(name_elements) >= 2:
                 # El primer elemento contiene los nombres
-                first_names = name_elements[0].get_text(strip=True)
+                first_names = name_elements[0].text.strip()
                 # El segundo elemento contiene los apellidos
-                last_names = name_elements[1].get_text(strip=True)
+                last_names = name_elements[1].text.strip()
                 
                 # Combinar y limpiar espacios múltiples
                 full_name = f"{first_names} {last_names}"
                 full_name = ' '.join(full_name.split())  # Eliminar espacios múltiples
                 
-                print(f"✅ Nombre extraído: {full_name}")
                 return full_name if full_name else None
             
-            print(f"⚠️ No se encontraron elementos de nombre (encontrados: {len(name_elements)})")
             return None
             
         except Exception as e:
@@ -298,10 +312,10 @@ class SisbenScraperAuto:
         return results
     
     def close(self):
-        """Cierra la sesión"""
-        if self.session:
-            self.session.close()
-            print("🔒 Sesión cerrada")
+        """Cierra el driver del navegador"""
+        if self.driver:
+            self.driver.quit()
+            print("🔒 Driver cerrado correctamente")
 
 
 def save_sisben_results(result, filename=None):

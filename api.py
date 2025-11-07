@@ -99,7 +99,7 @@ async def get_procuraduria_data(request: PeticionRequest):
     start_time = time.time()
     scraper = None
     try:
-        scraper = ProcuraduriaScraperAuto(headless=True)
+        scraper = ProcuraduriaScraperAuto(API_KEY)
         result = scraper.scrape_nuip(request.nuip)
         
         # Si enviarapi es True y se encontró el nombre, enviar al API externo
@@ -230,222 +230,6 @@ async def get_registraduria_data(request: PeticionRequest):
             }
         )
 
-@app.post("/consultar-combinado")
-async def get_combined_data(request: PeticionRequest):
-    """
-    Endpoint combinado optimizado que ejecuta consultas en paralelo:
-    - Puesto de votación (Registraduría)
-    - Nombres en orden de prioridad:
-      1. Sisben (siempre)
-      2. Procuraduría (siempre)
-      3. Policía (solo si hay fecha_expedicion)
-    """
-    start_time = time.time()
-    
-    # Determinar si incluir consulta de Policía según fecha_expedicion
-    use_police = request.fecha_expedicion is not None and request.fecha_expedicion.strip() != ""
-    
-    async def fetch_registraduria():
-        scraper = None
-        try:
-            scraper = RegistraduriaScraperAuto(API_KEY)
-            result = await asyncio.to_thread(scraper.scrape_nuip, request.nuip)
-            return {"success": True, "data": result, "source": "registraduria"}
-        except Exception as e:
-            return {"success": False, "error": str(e), "source": "registraduria"}
-        finally:
-            if scraper:
-                try:
-                    scraper.close()
-                except:
-                    pass
-    
-    async def fetch_police():
-        scraper = None
-        try:
-            scraper = PoliciaScraperAuto(headless=True)
-            result = await asyncio.to_thread(scraper.scrape_name_by_nuip, request.nuip, request.fecha_expedicion)
-            return {"success": True, "data": result, "source": "policia"}
-        except Exception as e:
-            return {"success": False, "error": str(e), "source": "policia"}
-        finally:
-            if scraper:
-                try:
-                    scraper.close()
-                except:
-                    pass
-    
-    async def fetch_procuraduria():
-        scraper = None
-        try:
-            scraper = ProcuraduriaScraperAuto(headless=True)
-            result = await asyncio.to_thread(scraper.scrape_nuip, request.nuip)
-            return {"success": True, "data": result, "source": "procuraduria"}
-        except Exception as e:
-            return {"success": False, "error": str(e), "source": "procuraduria"}
-        finally:
-            if scraper:
-                try:
-                    scraper.close()
-                except:
-                    pass
-    
-    async def fetch_sisben():
-        scraper = None
-        try:
-            scraper = SisbenScraperAuto(headless=True)
-            result = await asyncio.to_thread(scraper.scrape_name_by_nuip, request.nuip)
-            return {"success": True, "data": result, "source": "sisben"}
-        except Exception as e:
-            return {"success": False, "error": str(e), "source": "sisben"}
-        finally:
-            if scraper:
-                try:
-                    scraper.close()
-                except:
-                    pass
-    
-    try:
-        # Ejecutar Registraduría y Sisben en paralelo primero
-        registraduria_result, sisben_result = await asyncio.gather(
-            fetch_registraduria(),
-            fetch_sisben(),
-            return_exceptions=True
-        )
-        
-        # Verificar si Sisben encontró el nombre
-        def has_valid_name(result):
-            """Verifica si el resultado tiene un nombre válido"""
-            if isinstance(result, Exception):
-                return False
-            if not result.get("success"):
-                return False
-            data = result.get("data", {})
-            name = data.get("name") or data.get("nombre") or data.get("nombre_completo")
-            return name is not None and name.strip() != ""
-        
-        sisben_has_name = has_valid_name(sisben_result)
-        
-        # Si Sisben no encontró el nombre, consultar Procuraduría
-        if not sisben_has_name:
-            procuraduria_result = await fetch_procuraduria()
-            procuraduria_has_name = has_valid_name(procuraduria_result)
-            
-            # Si Procuraduría tampoco encontró y hay fecha_expedicion, consultar Policía
-            if not procuraduria_has_name and use_police:
-                police_result = await fetch_police()
-            else:
-                police_result = None
-        else:
-            # Sisben encontró el nombre, no consultar otros
-            procuraduria_result = {"success": False, "skipped": True, "reason": "Nombre encontrado en Sisben"}
-            police_result = None
-        
-        response_time_seconds, execution_time = calculate_response_time(start_time)
-        
-        # Procesar resultados y extraer información
-        def extract_name(result):
-            """Extrae el nombre del resultado de cualquier scraper"""
-            if isinstance(result, Exception):
-                return None
-            if not result.get("success"):
-                return None
-            
-            data = result.get("data", {})
-            # Intentar obtener el nombre de diferentes estructuras
-            return data.get("name") or data.get("nombre") or data.get("nombre_completo")
-        
-        def extract_voting_place(result):
-            """Extrae información del puesto de votación"""
-            if isinstance(result, Exception):
-                return None
-            if not result.get("success"):
-                return None
-            
-            data = result.get("data", {})
-            records = data.get("data", [])
-            if records and len(records) > 0:
-                return records[0]  # Retornar el primer registro
-            return None
-        
-        # Extraer nombres de las diferentes fuentes con orden de prioridad
-        name_from_sisben = extract_name(sisben_result)
-        name_from_procuraduria = extract_name(procuraduria_result)
-        name_from_police = extract_name(police_result) if police_result else None
-        
-        # Determinar el nombre final (prioridad: Sisben > Procuraduría > Policía)
-        final_name = name_from_sisben or name_from_procuraduria or name_from_police
-        
-        # Extraer información del puesto de votación
-        voting_info = extract_voting_place(registraduria_result)
-        
-        # Determinar el estado general
-        has_name = final_name is not None
-        has_voting_info = voting_info is not None
-        
-        # Construir mensaje
-        messages = []
-        if has_name:
-            messages.append("Nombre encontrado")
-        if has_voting_info:
-            messages.append("Puesto de votación encontrado")
-        
-        if not messages:
-            messages.append("No se encontró información")
-        
-        overall_status = "success" if (has_name or has_voting_info) else "error"
-        
-        # Construir respuesta unificada
-        response = {
-            "status": overall_status,
-            "message": " - ".join(messages),
-            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-            "nuip": request.nuip,
-            "name": final_name,
-            "voting_place": voting_info,
-            "response_time_seconds": response_time_seconds,
-            "execution_time": execution_time,
-            "sources": {
-                "sisben": {
-                    "success": sisben_result.get("success", False) if not isinstance(sisben_result, Exception) else False,
-                    "name": name_from_sisben,
-                    "priority": 1,
-                    "consulted": True
-                },
-                "procuraduria": {
-                    "success": procuraduria_result.get("success", False) if not isinstance(procuraduria_result, Exception) else False,
-                    "name": name_from_procuraduria,
-                    "priority": 2,
-                    "consulted": not procuraduria_result.get("skipped", False) if not isinstance(procuraduria_result, Exception) else True,
-                    "skipped_reason": procuraduria_result.get("reason") if procuraduria_result.get("skipped") else None
-                },
-                "policia": {
-                    "success": police_result.get("success", False) if police_result and not isinstance(police_result, Exception) else False,
-                    "name": name_from_police,
-                    "priority": 3,
-                    "consulted": police_result is not None and not isinstance(police_result, Exception)
-                },
-                "registraduria": {
-                    "success": registraduria_result.get("success", False) if not isinstance(registraduria_result, Exception) else False,
-                    "has_data": has_voting_info
-                }
-            }
-        }
-        
-        return response
-        
-    except Exception as e:
-        response_time_seconds, execution_time = calculate_response_time(start_time)
-        
-        raise HTTPException(
-            status_code=500,
-            detail={
-                "error": f"Error al procesar la consulta combinada: {str(e)}",
-                "response_time_seconds": response_time_seconds,
-                "execution_time": execution_time
-            }
-        )
-
 def send_name_to_external_api(numero_documento: str, nombre_completo: str) -> dict:
     """
     Envía el nombre encontrado al endpoint externo
@@ -563,8 +347,8 @@ def send_voting_place_to_external_api(numero_documento: str, voting_data: dict) 
 async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     """
     Procesa un solo NUIP buscando el nombre en orden:
-    1. Procuraduría
-    2. Sisben (si no se encontró en Procuraduría)
+    1. Sisben
+    2. Procuraduría (si no se encontró en Sisben)
     3. Registraduría (puesto de votación)
     
     Args:
@@ -579,75 +363,75 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
     source = None
     
     try:
-        # 1. Buscar en Procuraduría primero
-        scraper_procuraduria = None
-        try:
-            print(f"🔍 Buscando en Procuraduría...")
-            scraper_procuraduria = ProcuraduriaScraperAuto(headless=True)
-            
-            # Usar timeout de 60 segundos para Procuraduría
-            result_procuraduria = await asyncio.wait_for(
-                asyncio.to_thread(scraper_procuraduria.scrape_nuip, nuip),
-                timeout=60.0
-            )
-            
-            # Verificar si se encontró el nombre
-            if result_procuraduria.get("status") == "success":
-                extracted_name = result_procuraduria.get("name")
-                if extracted_name and extracted_name.strip():
-                    name = extracted_name.strip()
-                    source = "procuraduria"
-                    print(f"✅ Nombre encontrado en Procuraduría: {name}")
-        except asyncio.TimeoutError:
-            print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
-        except Exception as e:
-            print(f"⚠️ Error en Procuraduría: {e}")
-        finally:
-            if scraper_procuraduria:
-                try:
-                    scraper_procuraduria.close()
-                except Exception as close_error:
-                    print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
-        
-        # 2. Si no se encontró en Procuraduría, buscar en Sisben
-        if not name:
-            max_intentos_sisben = 1
-            for intento_sisben in range(1, max_intentos_sisben + 1):
-                scraper_sisben = None
-                try:
-                    print(f"🔍 Sisben - Intento {intento_sisben}/{max_intentos_sisben}")
-                    scraper_sisben = SisbenScraperAuto(headless=True)
-                    
-                    # Usar timeout de 60 segundos para Sisben
-                    result_sisben = await asyncio.wait_for(
-                        asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, nuip),
-                        timeout=60.0
-                    )
-                    
-                    # Verificar si se encontró el nombre
-                    if result_sisben.get("status") == "success":
-                        extracted_name = result_sisben.get("name")
-                        if extracted_name and extracted_name.strip():
-                            name = extracted_name.strip()
-                            source = "sisben"
-                            print(f"✅ Nombre encontrado en Sisben: {name}")
-                            break  # Salir del loop si se encontró
-                except asyncio.TimeoutError:
-                    print(f"⏱️ Timeout en Sisben intento {intento_sisben} (60s excedidos)")
-                except Exception as e:
-                    print(f"⚠️ Error en Sisben intento {intento_sisben}: {e}")
-                finally:
-                    if scraper_sisben:
-                        try:
-                            scraper_sisben.close()
-                        except Exception as close_error:
-                            print(f"⚠️ Error al cerrar Sisben: {close_error}")
+        # 1. Buscar en Sisben primero
+        max_intentos_sisben = 1
+        for intento_sisben in range(1, max_intentos_sisben + 1):
+            scraper_sisben = None
+            try:
+                print(f"🔍 Sisben - Intento {intento_sisben}/{max_intentos_sisben}")
+                scraper_sisben = SisbenScraperAuto(headless=True)
                 
-                # Esperar un poco antes del siguiente intento (solo si no es el último)
-                if intento_sisben < max_intentos_sisben and not name:
-                    await asyncio.sleep(2)
+                # Usar timeout de 60 segundos para Sisben
+                result_sisben = await asyncio.wait_for(
+                    asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, nuip),
+                    timeout=60.0
+                )
+                
+                # Verificar si se encontró el nombre
+                if result_sisben.get("status") == "success":
+                    extracted_name = result_sisben.get("name")
+                    if extracted_name and extracted_name.strip():
+                        name = extracted_name.strip()
+                        source = "sisben"
+                        print(f"✅ Nombre encontrado en Sisben: {name}")
+                        break  # Salir del loop si se encontró
+            except asyncio.TimeoutError:
+                print(f"⏱️ Timeout en Sisben intento {intento_sisben} (60s excedidos)")
+            except Exception as e:
+                print(f"⚠️ Error en Sisben intento {intento_sisben}: {e}")
+            finally:
+                if scraper_sisben:
+                    try:
+                        scraper_sisben.close()
+                    except Exception as close_error:
+                        print(f"⚠️ Error al cerrar Sisben: {close_error}")
+            
+            # Esperar un poco antes del siguiente intento (solo si no es el último)
+            if intento_sisben < max_intentos_sisben and not name:
+                await asyncio.sleep(2)
         
-        # 3. Si encontró el nombre (en Procuraduría o Sisben), enviar al API y luego consultar puesto
+        # 2. Si no se encontró en Sisben, buscar en Procuraduría
+        if not name:
+            scraper_procuraduria = None
+            try:
+                print(f"🔍 Buscando en Procuraduría...")
+                scraper_procuraduria = ProcuraduriaScraperAuto(API_KEY)
+                
+                # Usar timeout de 60 segundos para Procuraduría
+                result_procuraduria = await asyncio.wait_for(
+                    asyncio.to_thread(scraper_procuraduria.scrape_nuip, nuip),
+                    timeout=60.0
+                )
+                
+                # Verificar si se encontró el nombre
+                if result_procuraduria.get("status") == "success":
+                    extracted_name = result_procuraduria.get("name")
+                    if extracted_name and extracted_name.strip():
+                        name = extracted_name.strip()
+                        source = "procuraduria"
+                        print(f"✅ Nombre encontrado en Procuraduría: {name}")
+            except asyncio.TimeoutError:
+                print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
+            except Exception as e:
+                print(f"⚠️ Error en Procuraduría: {e}")
+            finally:
+                if scraper_procuraduria:
+                    try:
+                        scraper_procuraduria.close()
+                    except Exception as close_error:
+                        print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
+        
+        # 3. Si encontró el nombre (en Sisben o Procuraduría), enviar al API y luego consultar puesto
         if name:
             # 1. PRIMERO: Enviar nombre al endpoint externo (solo si enviarapi=True)
             nombre_response = {}
@@ -733,8 +517,8 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
 async def get_name_sequential(request: ConsultaNombreRequest):
     """
     Endpoint que busca nombres para múltiples NUIPs secuencialmente en:
-    1. Procuraduría
-    2. Sisben (si no se encontró en Procuraduría)
+    1. Sisben
+    2. Procuraduría (si no se encontró en Sisben)
     3. Registraduría (para puesto de votación)
     
     Si encuentra el nombre, lo envía automáticamente al endpoint externo.
@@ -814,8 +598,8 @@ async def get_name_sequential(request: ConsultaNombreRequest):
 async def get_solo_name_sequential(request: PeticionRequest):
     """
     Endpoint que busca nombre para un NUIP en:
-    1. Procuraduría
-    2. Sisben (si no se encontró en Procuraduría)
+    1. Sisben
+    2. Procuraduría (si no se encontró en Sisben)
     
     Args:
         nuip: Número de identificación a consultar
@@ -833,62 +617,62 @@ async def get_solo_name_sequential(request: PeticionRequest):
     print(f"{'='*60}\n")
     
     try:
-        # 1. Buscar en Procuraduría primero
-        scraper_procuraduria = None
+        # 1. Buscar en Sisben primero
+        scraper_sisben = None
         try:
-            print(f"🔍 Buscando en Procuraduría...")
-            scraper_procuraduria = ProcuraduriaScraperAuto(headless=True)
+            print(f"🔍 Buscando en Sisben...")
+            scraper_sisben = SisbenScraperAuto(headless=True)
             
-            result_procuraduria = await asyncio.wait_for(
-                asyncio.to_thread(scraper_procuraduria.scrape_nuip, request.nuip),
+            result_sisben = await asyncio.wait_for(
+                asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, request.nuip),
                 timeout=60.0
             )
             
-            if result_procuraduria.get("status") == "success":
-                extracted_name = result_procuraduria.get("name")
+            if result_sisben.get("status") == "success":
+                extracted_name = result_sisben.get("name")
                 if extracted_name and extracted_name.strip():
                     name = extracted_name.strip()
-                    source = "procuraduria"
-                    print(f"✅ Nombre encontrado en Procuraduría: {name}")
+                    source = "sisben"
+                    print(f"✅ Nombre encontrado en Sisben: {name}")
         except asyncio.TimeoutError:
-            print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
+            print(f"⏱️ Timeout en Sisben (60s excedidos)")
         except Exception as e:
-            print(f"⚠️ Error en Procuraduría: {e}")
+            print(f"⚠️ Error en Sisben: {e}")
         finally:
-            if scraper_procuraduria:
+            if scraper_sisben:
                 try:
-                    scraper_procuraduria.close()
+                    scraper_sisben.close()
                 except Exception as close_error:
-                    print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
+                    print(f"⚠️ Error al cerrar Sisben: {close_error}")
         
-        # 2. Si no se encontró en Procuraduría, buscar en Sisben
+        # 2. Si no se encontró en Sisben, buscar en Procuraduría
         if not name:
-            scraper_sisben = None
+            scraper_procuraduria = None
             try:
-                print(f"🔍 Buscando en Sisben...")
-                scraper_sisben = SisbenScraperAuto(headless=True)
+                print(f"🔍 Buscando en Procuraduría...")
+                scraper_procuraduria = ProcuraduriaScraperAuto(API_KEY)
                 
-                result_sisben = await asyncio.wait_for(
-                    asyncio.to_thread(scraper_sisben.scrape_name_by_nuip, request.nuip),
+                result_procuraduria = await asyncio.wait_for(
+                    asyncio.to_thread(scraper_procuraduria.scrape_nuip, request.nuip),
                     timeout=60.0
                 )
                 
-                if result_sisben.get("status") == "success":
-                    extracted_name = result_sisben.get("name")
+                if result_procuraduria.get("status") == "success":
+                    extracted_name = result_procuraduria.get("name")
                     if extracted_name and extracted_name.strip():
                         name = extracted_name.strip()
-                        source = "sisben"
-                        print(f"✅ Nombre encontrado en Sisben: {name}")
+                        source = "procuraduria"
+                        print(f"✅ Nombre encontrado en Procuraduría: {name}")
             except asyncio.TimeoutError:
-                print(f"⏱️ Timeout en Sisben (60s excedidos)")
+                print(f"⏱️ Timeout en Procuraduría (60s excedidos)")
             except Exception as e:
-                print(f"⚠️ Error en Sisben: {e}")
+                print(f"⚠️ Error en Procuraduría: {e}")
             finally:
-                if scraper_sisben:
+                if scraper_procuraduria:
                     try:
-                        scraper_sisben.close()
+                        scraper_procuraduria.close()
                     except Exception as close_error:
-                        print(f"⚠️ Error al cerrar Sisben: {close_error}")
+                        print(f"⚠️ Error al cerrar Procuraduría: {close_error}")
         
         response_time_seconds, execution_time = calculate_response_time(start_time)
         

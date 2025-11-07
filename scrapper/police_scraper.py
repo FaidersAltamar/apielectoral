@@ -1,200 +1,169 @@
 import time
 import json
 import os
-from selenium import webdriver
-from selenium.webdriver.common.by import By
-from selenium.webdriver.support.ui import WebDriverWait
-from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
-from webdriver_manager.chrome import ChromeDriverManager
+import requests
+from bs4 import BeautifulSoup
 from datetime import datetime
 
 class PoliciaScraperAuto:
-    """Scraper automatizado para consultas de nombres en el sistema de la Policía Nacional"""
+    """Scraper automatizado para consultas de nombres en el sistema de la Policía Nacional usando requests y BeautifulSoup"""
     
-    def __init__(self, headless=True):
+    def __init__(self, headless=None):
         """
-        Inicializa el scraper de policía
+        Inicializa el scraper de policía con requests y BeautifulSoup
         
         Args:
-            headless (bool): Si ejecutar el navegador en modo headless
+            headless: Parámetro ignorado (mantenido por compatibilidad)
         """
-        self.headless = headless
-        self.driver = None
-        self.wait = None
-        self.setup_driver()
+        self.session = requests.Session()
+        self.base_url = "https://srvcnpc.policia.gov.co/PSC/frm_cnp_consulta.aspx"
+        
+        # Configurar headers para simular un navegador real
+        self.session.headers.update({
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+            'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Connection': 'keep-alive',
+            'Upgrade-Insecure-Requests': '1'
+        })
+        
+        print("✅ Scraper inicializado con requests y BeautifulSoup")
     
-    def _get_chrome_binary_path(self):
-        """Detecta la ruta del binario de Chrome según el sistema operativo"""
-        import platform
-        import shutil
-        
-        system = platform.system()
-        
-        # Posibles ubicaciones de Chrome/Chromium
-        possible_paths = []
-        
-        if system == "Linux":
-            possible_paths = [
-                "/usr/bin/google-chrome",
-                "/usr/bin/chromium-browser",
-                "/usr/bin/chromium",
-                "/snap/bin/chromium",
-                "/usr/local/bin/chrome",
-                "/usr/local/bin/chromium"
-            ]
-        elif system == "Windows":
-            possible_paths = [
-                "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
-                "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
-                os.path.expanduser("~\\AppData\\Local\\Google\\Chrome\\Application\\chrome.exe")
-            ]
-        elif system == "Darwin":  # macOS
-            possible_paths = [
-                "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
-                "/Applications/Chromium.app/Contents/MacOS/Chromium"
-            ]
-        
-        # Buscar el primer path que existe
-        for path in possible_paths:
-            if os.path.exists(path):
-                print(f"✅ Chrome encontrado en: {path}")
-                return path
-        
-        # Intentar usar 'which' en Linux/Mac
-        if system in ["Linux", "Darwin"]:
-            for cmd in ["google-chrome", "chromium-browser", "chromium"]:
-                chrome_path = shutil.which(cmd)
-                if chrome_path:
-                    print(f"✅ Chrome encontrado via which: {chrome_path}")
-                    return chrome_path
-        
-        print("⚠️ No se encontró Chrome en ubicaciones conocidas")
-        return None
-    
-    def setup_driver(self):
-        """Configura el driver de Chrome"""
+    def get_page_content(self):
+        """Obtiene el contenido HTML de la página inicial"""
         try:
-            chrome_options = Options()
-            
-            # Detectar y establecer ubicación del binario de Chrome
-            chrome_binary = self._get_chrome_binary_path()
-            if chrome_binary:
-                chrome_options.binary_location = chrome_binary
-                print(f"🔧 Usando Chrome en: {chrome_binary}")
-            
-            if self.headless:
-                chrome_options.add_argument("--headless=new")
-                chrome_options.add_argument("--disable-gpu")
-                chrome_options.add_argument("--window-size=1920,1080")
-            
-            # Configuraciones críticas para producción/Linux
-            chrome_options.add_argument("--no-sandbox")
-            chrome_options.add_argument("--disable-dev-shm-usage")
-            chrome_options.add_argument("--disable-setuid-sandbox")
-            chrome_options.add_argument("--remote-debugging-port=9222")
-            
-            # Optimizaciones de rendimiento
-            chrome_options.add_argument("--disable-software-rasterizer")
-            chrome_options.add_argument("--disable-extensions")
-            chrome_options.add_argument("--disable-background-networking")
-            chrome_options.add_argument("--disable-default-apps")
-            chrome_options.add_argument("--disable-sync")
-            chrome_options.add_argument("--metrics-recording-only")
-            chrome_options.add_argument("--mute-audio")
-            chrome_options.add_argument("--no-first-run")
-            chrome_options.add_argument("--safebrowsing-disable-auto-update")
-            chrome_options.add_argument("--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
-            
-            # Usar webdriver-manager para obtener el driver correcto automáticamente
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
-            self.wait = WebDriverWait(self.driver, 15)  # Aumentado el timeout
-            
-            print("✅ Driver de Chrome configurado correctamente")
-            
-        except Exception as e:
-            print(f"❌ Error al configurar el driver: {e}")
-            raise
+            print(f"🌐 Obteniendo página: {self.base_url}")
+            response = self.session.get(self.base_url, timeout=15)
+            response.raise_for_status()
+            print("✅ Página obtenida correctamente")
+            return response.text
+        except requests.RequestException as e:
+            print(f"❌ Error al obtener la página: {e}")
+            return None
     
-    def scrape_name_by_nuip(self, nuip, fecha_expedicion):
+    def parse_page(self, html_content):
+        """Parsea el contenido HTML con BeautifulSoup"""
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            return soup
+        except Exception as e:
+            print(f"❌ Error al parsear HTML: {e}")
+            return None
+    
+    def extract_form_data(self, soup):
+        """Extrae todos los campos hidden y viewstate del formulario ASP.NET"""
+        try:
+            form_data = {}
+            
+            # Buscar todos los inputs hidden (crítico para ASP.NET)
+            hidden_inputs = soup.find_all('input', type='hidden')
+            for hidden in hidden_inputs:
+                name = hidden.get('name')
+                value = hidden.get('value', '')
+                if name:
+                    form_data[name] = value
+            
+            print(f"✅ Extraídos {len(form_data)} campos del formulario")
+            return form_data
+        except Exception as e:
+            print(f"❌ Error al extraer datos del formulario: {e}")
+            return {}
+    
+    def submit_form(self, nuip, fecha_expedicion, form_data):
+        """Envía el formulario de consulta con POST request"""
+        try:
+            print("📤 Enviando formulario de consulta...")
+            
+            # Preparar datos del formulario
+            post_data = form_data.copy()
+            post_data.update({
+                'ctl00$ContentPlaceHolder3$ddlTipoDoc': '55',  # Tipo de documento
+                'ctl00$ContentPlaceHolder3$txtExpediente': str(nuip),
+                'ctl00$ContentPlaceHolder3$txtFechaexp': str(fecha_expedicion),
+                'ctl00$ContentPlaceHolder3$btnConsultar2': 'Consultar',
+                '__EVENTTARGET': '',
+                '__EVENTARGUMENT': ''
+            })
+            
+            print(f"🔍 Datos del formulario a enviar:")
+            print(f"   - Tipo Doc: 55")
+            print(f"   - NUIP: {nuip}")
+            print(f"   - Fecha: {fecha_expedicion}")
+            
+            # Actualizar headers para el POST
+            headers = self.session.headers.copy()
+            headers.update({
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://srvcnpc.policia.gov.co',
+                'Referer': self.base_url
+            })
+            
+            # Enviar formulario
+            print("⏳ Enviando POST request y esperando respuesta del servidor...")
+            response = self.session.post(
+                self.base_url,
+                data=post_data,
+                headers=headers,
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            print("✅ Respuesta recibida del servidor")
+            
+            # Esperar un momento adicional
+            time.sleep(2)
+            
+            return response.text
+            
+        except requests.RequestException as e:
+            print(f"❌ Error al enviar formulario: {e}")
+            return None
+    
+    def scrape_name_by_nuip(self, nuip, fecha_expedicion, max_retries=3):
         """
         Consulta el nombre de una persona por NUIP y fecha de expedición
         
         Args:
             nuip (str): Número único de identificación personal
             fecha_expedicion (str): Fecha de expedición en formato dd/mm/yyyy
+            max_retries (int): Número máximo de reintentos en caso de error
         
         Returns:
             dict: Resultado de la consulta
         """
         start_time = time.time()
+        last_error = None
         
-        try:
-            print(f"🔍 Consultando nombre para NUIP: {nuip}, Fecha: {fecha_expedicion}")
-            
-            # Navegar a la página de consulta de la policía
-            url = "https://srvcnpc.policia.gov.co/PSC/frm_cnp_consulta.aspx"
-            self.driver.get(url)
-            
-            # Esperar a que la página cargue completamente
-            time.sleep(2)
-            
-            # 1. Seleccionar tipo de documento (value 55)
-            tipo_doc_dropdown = self.wait.until(
-                EC.presence_of_element_located((By.ID, "ctl00_ContentPlaceHolder3_ddlTipoDoc"))
-            )
-            select_tipo_doc = Select(tipo_doc_dropdown)
-            select_tipo_doc.select_by_value("55")
-            print("✅ Tipo de documento seleccionado (value 55)")
-            
-            # Esperar un segundo
-            time.sleep(1)            
-            
-            # 2. Llenar el campo NUIP
-            nuip_field = self.wait.until(
-                EC.presence_of_element_located((By.ID, "ctl00_ContentPlaceHolder3_txtExpediente"))
-            )
-            nuip_field.clear()
-            nuip_field.send_keys(nuip)
-            print(f"✅ NUIP ingresado: {nuip}")
-            
-            # 3. Llenar la fecha de expedición
-            fecha_field = self.wait.until(
-                EC.presence_of_element_located((By.NAME, "ctl00$ContentPlaceHolder3$txtFechaexp"))
-            )
-            fecha_field.clear()
-            fecha_field.send_keys(fecha_expedicion)
-            print(f"✅ Fecha de expedición ingresada: {fecha_expedicion}")
-            
-            # 4. Hacer clic en el botón de consultar
-            consultar_btn = self.wait.until(
-                EC.element_to_be_clickable((By.ID, "ctl00_ContentPlaceHolder3_btnConsultar2"))
-            )
-            consultar_btn.click()
-            print("✅ Botón de consultar presionado")
-            
-            # 5. Esperar a que aparezcan los resultados
-            time.sleep(5)  # Dar tiempo para que procese la consulta
-            
-            # 6. Intentar encontrar el nombre en los resultados
+        for attempt in range(1, max_retries + 1):
             try:
-                # Buscar el elemento que contiene el nombre
-                nombre_element = self.wait.until(
-                    EC.presence_of_element_located((By.ID, "ctl00_ContentPlaceHolder3_txtNameUser"))
-                )
-                nombre = nombre_element.text.strip()
+                print(f"\n{'='*50}")
+                print(f"🔍 Consultando nombre para NUIP: {nuip}, Fecha: {fecha_expedicion} (Intento {attempt}/{max_retries})")
+                print(f"{'='*50}")
                 
-                # Remover el punto final si existe
-                if nombre.endswith('.'):
-                    nombre = nombre[:-1]
+                # 1. Obtener página inicial
+                html_content = self.get_page_content()
+                if not html_content:
+                    raise Exception("Error al obtener la página inicial")
+                
+                # 2. Parsear página
+                soup = self.parse_page(html_content)
+                if not soup:
+                    raise Exception("Error al parsear la página")
+                
+                # 3. Extraer datos del formulario (ViewState, etc.)
+                form_data = self.extract_form_data(soup)
+                
+                # 4. Enviar formulario
+                response_html = self.submit_form(nuip, fecha_expedicion, form_data)
+                if not response_html:
+                    raise Exception("Error al enviar formulario")
+                
+                # 5. Extraer el nombre del resultado
+                nombre = self._extract_name(response_html)
                 
                 if nombre:
                     execution_time = time.time() - start_time
-                    
                     result = {
                         "status": "success",
                         "message": "Nombre encontrado exitosamente",
@@ -204,68 +173,81 @@ class PoliciaScraperAuto:
                         "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
                         "execution_time_seconds": round(execution_time, 2)
                     }
-                    
                     print(f"✅ Nombre encontrado: {nombre}")
                     return result
                 else:
-                    raise NoSuchElementException("Nombre vacío")
+                    # No se encontró nombre, reintentar si es posible
+                    if attempt < max_retries:
+                        print(f"⚠️ No se encontró nombre en intento {attempt}, reintentando...")
+                        time.sleep(2)
+                        continue
+                    else:
+                        execution_time = time.time() - start_time
+                        return {
+                            "status": "not_found",
+                            "message": "No se encontró información para los datos proporcionados",
+                            "nuip": nuip,
+                            "fecha_expedicion": fecha_expedicion,
+                            "name": None,
+                            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                            "execution_time_seconds": round(execution_time, 2)
+                        }
                 
-            except (TimeoutException, NoSuchElementException):
-                # Si no se encuentra el nombre, buscar mensajes de error
-                try:
-                    # Buscar posibles mensajes de error en la página
-                    error_selectors = [
-                        "//div[contains(@class, 'alert')]",
-                        "//div[contains(@class, 'error')]",
-                        "//span[contains(@class, 'error')]",
-                        "//div[contains(text(), 'No se encontr')]",
-                        "//span[contains(text(), 'No se encontr')]"
-                    ]
-                    
-                    error_message = "No se encontró información para los datos proporcionados"
-                    
-                    for selector in error_selectors:
-                        try:
-                            error_element = self.driver.find_element(By.XPATH, selector)
-                            if error_element.text.strip():
-                                error_message = error_element.text.strip()
-                                break
-                        except:
-                            continue
-                            
-                except:
-                    error_message = "No se encontró información para los datos proporcionados"
+            except Exception as e:
+                last_error = e
+                print(f"❌ Error en intento {attempt}: {e}")
                 
-                execution_time = time.time() - start_time
-                
-                result = {
-                    "status": "not_found",
-                    "message": error_message,
-                    "nuip": nuip,
-                    "fecha_expedicion": fecha_expedicion,
-                    "name": None,
-                    "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                    "execution_time_seconds": round(execution_time, 2)
-                }
-                
-                print(f"⚠️ No se encontró información para NUIP: {nuip}")
-                return result
+                # Reintentar si no es el último intento
+                if attempt < max_retries:
+                    print(f"🔄 Reintentando en 3 segundos...")
+                    time.sleep(3)
+                    continue
         
+        # Si llegamos aquí, todos los intentos fallaron
+        execution_time = time.time() - start_time
+        return {
+            "status": "error",
+            "message": f"Error después de {max_retries} intentos: {str(last_error)}",
+            "nuip": nuip,
+            "fecha_expedicion": fecha_expedicion,
+            "name": None,
+            "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+            "execution_time_seconds": round(execution_time, 2)
+        }
+    
+    def _extract_name(self, html_content):
+        """
+        Extrae el nombre del resultado de la consulta
+        
+        Args:
+            html_content (str): Contenido HTML de la respuesta
+        
+        Returns:
+            str: Nombre completo o None si no se encuentra
+        """
+        try:
+            soup = BeautifulSoup(html_content, 'html.parser')
+            
+            # Buscar el elemento que contiene el nombre
+            nombre_element = soup.find('span', id='ctl00_ContentPlaceHolder3_txtNameUser')
+            
+            if nombre_element:
+                nombre = nombre_element.get_text(strip=True)
+                
+                # Remover el punto final si existe
+                if nombre.endswith('.'):
+                    nombre = nombre[:-1]
+                
+                if nombre:
+                    print(f"✅ Nombre extraído: {nombre}")
+                    return nombre
+            
+            print("⚠️ No se encontró el elemento del nombre")
+            return None
+            
         except Exception as e:
-            execution_time = time.time() - start_time
-            
-            result = {
-                "status": "error",
-                "message": f"Error durante la consulta: {str(e)}",
-                "nuip": nuip,
-                "fecha_expedicion": fecha_expedicion,
-                "name": None,
-                "timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
-                "execution_time_seconds": round(execution_time, 2)
-            }
-            
-            print(f"❌ Error al consultar NUIP {nuip}: {e}")
-            return result
+            print(f"⚠️ Error al extraer nombre: {e}")
+            return None
     
     def scrape_multiple_names(self, queries, delay=5):
         """
@@ -298,10 +280,10 @@ class PoliciaScraperAuto:
         return results
     
     def close(self):
-        """Cierra el driver del navegador"""
-        if self.driver:
-            self.driver.quit()
-            print("🔒 Driver cerrado correctamente")
+        """Cierra la sesión"""
+        if self.session:
+            self.session.close()
+            print("🔒 Sesión cerrada")
 
 
 def save_police_results(result, filename=None):
