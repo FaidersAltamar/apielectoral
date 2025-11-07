@@ -88,7 +88,7 @@ class RegistraduriaScraperAuto:
         # Si hay extensión cargada, esperar un momento para que se inicialice
         if self.extension_path:
             print("⏳ Esperando que la extensión se inicialice...")
-            time.sleep(3)
+            time.sleep(1.5)
     
     def load_page(self):
         """Carga la página de consulta"""
@@ -101,8 +101,8 @@ class RegistraduriaScraperAuto:
                 EC.presence_of_element_located((By.ID, "nuip"))
             )
 
-            # Esperar menos tiempo para que se cargue
-            time.sleep(1)
+            # Espera mínima - el WebDriverWait ya garantiza que la página está lista
+            time.sleep(0.5)
             
             print("✅ Página cargada correctamente")
             return True
@@ -124,8 +124,8 @@ class RegistraduriaScraperAuto:
             nuip_field.clear()
             nuip_field.send_keys(str(nuip))
             
-            # Esperar a que se carguen las opciones del select
-            time.sleep(2)
+            # Espera reducida para opciones del select
+            time.sleep(0.5)
             
             # Seleccionar tipo de elección
             select_element = Select(self.driver.find_element(By.ID, "tipo"))
@@ -252,37 +252,23 @@ class RegistraduriaScraperAuto:
             """
             
             result = self.driver.execute_script(injection_script)
-            print(f"🔍 Resultado de inyección: {result}")
             
-            # Esperar un momento para que se procese
-            time.sleep(3)
+            # Espera mínima para que se procese la inyección
+            time.sleep(1)
             
-            # Verificar que la respuesta se haya inyectado correctamente
+            # Verificación rápida simplificada
             verification_script = """
-            var responseElement = document.getElementById('g-recaptcha-response') || 
-                                document.querySelector('[name="g-recaptcha-response"]');
-            if (responseElement && responseElement.value) {
-                return {
-                    success: true,
-                    response_length: responseElement.value.length,
-                    response_preview: responseElement.value.substring(0, 50) + '...'
-                };
-            } else {
-                return {
-                    success: false,
-                    message: 'No se encontró respuesta en el elemento'
-                };
-            }
+            var responseElement = document.getElementById('g-recaptcha-response');
+            return responseElement && responseElement.value && responseElement.value.length > 0;
             """
             
             verification_result = self.driver.execute_script(verification_script)
-            print(f"🔍 Verificación de inyección: {verification_result}")
             
-            if verification_result.get('success'):
-                print("✅ reCAPTCHA resuelto e inyectado correctamente en la página")
+            if verification_result:
+                print("✅ reCAPTCHA resuelto e inyectado correctamente")
                 return True
             else:
-                print(f"❌ Error en la verificación: {verification_result.get('message')}")
+                print("❌ Error: No se pudo verificar la inyección del captcha")
                 return False
         
         except Exception as e:
@@ -302,7 +288,7 @@ class RegistraduriaScraperAuto:
             
             # Scroll hacia el botón para asegurar que esté visible
             self.driver.execute_script("arguments[0].scrollIntoView(true);", submit_button)
-            time.sleep(1)
+            time.sleep(0.3)
             
             submit_button.click()
             

@@ -13,7 +13,12 @@ class TwoCaptchaSolver:
             api_key (str): API key de 2captcha
         """
         self.api_key = api_key
-        self.solver = TwoCaptcha(api_key)
+        # Configurar solver con polling más agresivo para respuestas rápidas
+        self.solver = TwoCaptcha(
+            api_key,
+            pollingInterval=3,  # Verificar cada 3 segundos (default: 10)
+            defaultTimeout=90   # Timeout de 90 segundos (default: 120)
+        )
     
     def get_balance(self):
         """
@@ -75,15 +80,16 @@ class TwoCaptchaSolver:
         print(f"🔍 Debugging - Invisible: {invisible}")
         
         try:
-            # Resolver reCAPTCHA usando la librería oficial
+            # Resolver reCAPTCHA usando la librería oficial con configuración optimizada
             result = self.solver.recaptcha(
                 sitekey=site_key,
                 url=page_url,
-                invisible=1 if invisible else 0
+                invisible=1 if invisible else 0,
+                pollingInterval=2  # Polling cada 2 segundos para esta petición específica
             )
             
             print("✅ reCAPTCHA resuelto exitosamente!")
-            print(f"🔍 Debugging - Respuesta: {result}")
+            print(f"🔍 Token recibido (primeros 50 chars): {result['code'][:50]}...")
             return result['code']
         
         except Exception as e:
