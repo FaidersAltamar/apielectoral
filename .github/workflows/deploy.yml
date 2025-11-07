@@ -44,10 +44,17 @@ jobs:
             # Fix permissions
             sudo chown -R ubuntu:ubuntu "$PROJECT_DIR"
             
+            # Stash any local changes
+            echo "💾 Stashing local changes..."
+            git stash
+            
             # Pull latest changes
             echo "📥 Pulling latest changes from repository..."
             git pull origin main || git pull origin master
             echo "✅ Code updated"
+            
+            # Apply stashed changes if any
+            git stash pop || echo "ℹ️ No stashed changes to apply"
             
             # Make deploy script executable
             chmod +x deploy.sh
