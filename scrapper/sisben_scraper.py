@@ -6,9 +6,10 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
-from selenium.webdriver.support.ui import Select
 from selenium.webdriver.chrome.options import Options
-from selenium.common.exceptions import TimeoutException, NoSuchElementException
+from selenium.webdriver.chrome.service import Service
+from selenium.common.exceptions import TimeoutException, NoSuchElementException, WebDriverException
+from webdriver_manager.chrome import ChromeDriverManager
 from datetime import datetime
 
 class SisbenScraperAuto:
@@ -41,7 +42,7 @@ class SisbenScraperAuto:
         chrome_options.add_argument("--no-sandbox")
         chrome_options.add_argument("--disable-dev-shm-usage")
         chrome_options.add_argument("--disable-setuid-sandbox")
-        chrome_options.add_argument("--remote-debugging-port=9222")
+        # REMOVIDO: --remote-debugging-port=9222 (causa conflictos con múltiples instancias)
         
         # Argumentos adicionales para estabilidad en producción
         chrome_options.add_argument("--disable-software-rasterizer")
@@ -77,7 +78,9 @@ class SisbenScraperAuto:
                 print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
         
         try:
-            self.driver = webdriver.Chrome(options=chrome_options)
+            # Usar webdriver-manager para gestión automática de ChromeDriver
+            service = Service(ChromeDriverManager().install())
+            self.driver = webdriver.Chrome(service=service, options=chrome_options)
         except Exception as e:
             print(f"❌ Error al inicializar Chrome: {e}")
             print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
