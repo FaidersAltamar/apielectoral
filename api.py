@@ -199,7 +199,7 @@ async def get_registraduria_data(request: PeticionRequest):
     start_time = time.time() 
     
     try:
-        scraper = RegistraduriaScraperAuto(API_KEY, headless=True)
+        scraper = RegistraduriaScraperAuto(API_KEY)
         
         try:
             result = scraper.scrape_nuip(request.nuip)
@@ -248,7 +248,7 @@ async def get_combined_data(request: PeticionRequest):
     async def fetch_registraduria():
         scraper = None
         try:
-            scraper = RegistraduriaScraperAuto(API_KEY, headless=True)
+            scraper = RegistraduriaScraperAuto(API_KEY)
             result = await asyncio.to_thread(scraper.scrape_nuip, request.nuip)
             return {"success": True, "data": result, "source": "registraduria"}
         except Exception as e:
@@ -660,7 +660,7 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
             scraper_registraduria = None
             try:
                 print(f"🗳️ Consultando puesto de votación para {nuip}...")
-                scraper_registraduria = RegistraduriaScraperAuto(API_KEY, headless=True)
+                scraper_registraduria = RegistraduriaScraperAuto(API_KEY)
                 
                 # Usar asyncio.wait_for para timeout de 120 segundos
                 voting_result = await asyncio.wait_for(
