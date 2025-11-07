@@ -3,6 +3,7 @@ import time
 import json
 import os
 import sys
+import undetected_chromedriver as uc
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.support.ui import WebDriverWait, Select
