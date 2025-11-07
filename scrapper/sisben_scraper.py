@@ -44,6 +44,10 @@ class SisbenScraperAuto:
         chrome_options.add_argument("--disable-setuid-sandbox")
         # REMOVIDO: --remote-debugging-port=9222 (causa conflictos con múltiples instancias)
         
+        # Configuración de directorios para headless (Fix DevToolsActivePort error)
+        chrome_options.add_argument(f"--user-data-dir=/tmp/chrome-user-data-{os.getpid()}")
+        chrome_options.add_argument("--crash-dumps-dir=/tmp")
+        
         # Argumentos adicionales para estabilidad en producción
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-features=VizDisplayCompositor")
