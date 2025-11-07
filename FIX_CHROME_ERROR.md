@@ -1,5 +1,7 @@
 # 🔧 Solución para Error de Chrome en Producción
 
+> **⚠️ NOTA:** Para el error "Chrome instance exited", consulta la guía completa en [CHROME_SESSION_ERROR_FIX.md](./CHROME_SESSION_ERROR_FIX.md)
+
 ## Error Actual
 ```
 session not created: Chrome instance exited
