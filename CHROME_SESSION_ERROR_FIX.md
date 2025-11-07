@@ -100,7 +100,7 @@ Se agregaron argumentos críticos para estabilidad en producción:
 # Argumentos adicionales para estabilidad en producción
 chrome_options.add_argument("--disable-software-rasterizer")
 chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-chrome_options.add_argument("--single-process")
+# REMOVIDO: --single-process (incompatible con --no-sandbox en Linux)
 chrome_options.add_argument("--disable-web-security")
 chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
 chrome_options.add_argument("--ignore-certificate-errors")
@@ -109,7 +109,7 @@ chrome_options.add_argument("--ignore-certificate-errors")
 **Explicación de cada argumento:**
 - `--disable-software-rasterizer`: Evita usar renderizado por software
 - `--disable-features=VizDisplayCompositor`: Desactiva compositor visual que puede causar crashes
-- `--single-process`: Ejecuta Chrome en un solo proceso (más estable en servidores)
+- ~~`--single-process`~~: **REMOVIDO** - Incompatible con `--no-sandbox` en Linux, causa crashes
 - `--disable-web-security`: Desactiva políticas de seguridad web que pueden causar problemas
 - `--disable-features=IsolateOrigins,site-per-process`: Simplifica el modelo de procesos
 - `--ignore-certificate-errors`: Ignora errores de certificados SSL

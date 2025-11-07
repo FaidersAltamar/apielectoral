@@ -54,7 +54,7 @@ class RegistraduriaScraperAuto:
         # Argumentos adicionales para estabilidad en producción
         chrome_options.add_argument("--disable-software-rasterizer")
         chrome_options.add_argument("--disable-features=VizDisplayCompositor")
-        chrome_options.add_argument("--single-process")
+        # REMOVIDO: --single-process (incompatible con --no-sandbox en Linux)
         chrome_options.add_argument("--disable-web-security")
         chrome_options.add_argument("--disable-features=IsolateOrigins,site-per-process")
         chrome_options.add_argument("--ignore-certificate-errors")
@@ -67,7 +67,7 @@ class RegistraduriaScraperAuto:
         
         # Optimizaciones de rendimiento
         chrome_options.add_argument("--disable-extensions")
-        chrome_options.add_argument("--disable-software-rasterizer")
+        # REMOVIDO: --disable-software-rasterizer (duplicado arriba)
         chrome_options.add_argument("--disable-background-networking")
         chrome_options.add_argument("--disable-default-apps")
         chrome_options.add_argument("--disable-sync")
