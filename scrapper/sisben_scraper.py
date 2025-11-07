@@ -31,7 +31,7 @@ class SisbenScraperAuto:
     
     def setup_driver(self, headless=False):
         """Configura el driver de Chrome con soporte para extensiones"""
-        chrome_options = Options()
+        chrome_options = uc.ChromeOptions()
         
         if headless:
             chrome_options.add_argument("--headless=new")
@@ -82,9 +82,13 @@ class SisbenScraperAuto:
                 print(f"⚠️ Advertencia: No se encontró la extensión en: {self.extension_path}")
         
         try:
-            # Usar webdriver-manager para gestión automática de ChromeDriver
-            service = Service(ChromeDriverManager().install())
-            self.driver = webdriver.Chrome(service=service, options=chrome_options)
+            # Usar undetected_chromedriver para mejor compatibilidad en Linux
+            self.driver = uc.Chrome(
+                options=chrome_options,
+                use_subprocess=True,
+                version_main=None  # Detecta automáticamente la versión de Chrome
+            )
+            print("✅ Chrome iniciado con undetected_chromedriver")
         except Exception as e:
             print(f"❌ Error al inicializar Chrome: {e}")
             print("💡 Asegúrate de que Chrome/Chromium esté instalado en el sistema")
