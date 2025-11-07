@@ -2,20 +2,13 @@
 set -e
 
 echo "═══════════════════════════════════════════════════════"
-echo "🚀 API Electoral - Deployment Script (Port 80 with Nginx)"
+echo "🚀 FastAPI Deployment Script"
 echo "═══════════════════════════════════════════════════════"
 
 PROJECT_DIR="/var/www/html/apielectoral"
 VENV_PATH="$PROJECT_DIR/venv"
 
 cd "$PROJECT_DIR"
-
-# Check if nginx is installed
-if ! command -v nginx &> /dev/null; then
-    echo "⚠️  Nginx not found. Installing..."
-    sudo apt update
-    sudo apt install nginx -y
-fi
 
 # 1. Backup .env
 echo "📦 Backing up environment..."
@@ -60,69 +53,20 @@ else
     exit 1
 fi
 
-# 7. Setup Nginx
-echo "🌐 Configuring Nginx..."
-
-# Copy nginx config
-if [ -f "$PROJECT_DIR/nginx.conf" ]; then
-    sudo cp "$PROJECT_DIR/nginx.conf" /etc/nginx/sites-available/api-electoral
-    sudo ln -sf /etc/nginx/sites-available/api-electoral /etc/nginx/sites-enabled/
-    
-    # Remove default site if exists
-    sudo rm -f /etc/nginx/sites-enabled/default
-    
-    # Test nginx config
-    if sudo nginx -t 2>/dev/null; then
-        echo "✅ Nginx configuration valid"
-        sudo systemctl enable nginx 2>/dev/null || true
-        sudo systemctl reload nginx
-        echo "✅ Nginx reloaded"
-    else
-        echo "❌ Nginx configuration error"
-        sudo nginx -t
-        exit 1
-    fi
-else
-    echo "⚠️  nginx.conf not found, skipping nginx setup"
-fi
-
-# 8. Check status
+# 7. Check status
 sleep 3
-echo ""
-echo "🔍 Checking services status..."
-echo ""
-
-# Check FastAPI
 if sudo systemctl is-active --quiet api-electoral; then
-    echo "✅ FastAPI is running on port 8000"
-    sudo systemctl status api-electoral --no-pager -l | head -15
+    echo "✅ Service is running on port 8000"
+    sudo systemctl status api-electoral --no-pager -l | head -20
+    echo ""
+    echo "🌐 API accessible at: http://your-server-ip:8000/"
 else
-    echo "❌ FastAPI failed to start"
+    echo "❌ Service failed to start"
     sudo journalctl -u api-electoral -n 30 --no-pager
     exit 1
-fi
-
-echo ""
-
-# Check Nginx
-if sudo systemctl is-active --quiet nginx; then
-    echo "✅ Nginx is running on port 80"
-    sudo systemctl status nginx --no-pager -l | head -10
-else
-    echo "⚠️  Nginx is not running"
 fi
 
 echo ""
 echo "═══════════════════════════════════════════════════════"
 echo "✅ Deployment completed!"
 echo "═══════════════════════════════════════════════════════"
-echo ""
-echo "📡 Access your API at:"
-echo "   🌐 http://your-server-ip/docs"
-echo "   🏥 http://your-server-ip/health"
-echo "   💰 http://your-server-ip/balance"
-echo ""
-echo "📊 View logs:"
-echo "   FastAPI: sudo journalctl -u api-electoral -f"
-echo "   Nginx:   sudo tail -f /var/log/nginx/api-electoral-access.log"
-echo ""

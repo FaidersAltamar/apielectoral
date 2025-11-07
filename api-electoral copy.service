@@ -1,0 +1,24 @@
+[Unit]
+Description=API Electoral - FastAPI Application
+After=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/var/www/html/apielectoral
+Environment="PATH=/var/www/html/apielectoral/venv/bin"
+EnvironmentFile=/var/www/html/apielectoral/.env
+ExecStart=/var/www/html/apielectoral/venv/bin/uvicorn api:app --host 0.0.0.0 --port 8000 --workers 2
+Restart=always
+RestartSec=5
+
+# Limites de recursos
+LimitNOFILE=65536
+
+# Logs
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

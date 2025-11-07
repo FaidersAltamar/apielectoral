@@ -2,6 +2,22 @@
 
 API FastAPI para consultar información electoral de Colombia mediante web scraping de fuentes oficiales.
 
+## 🌐 Despliegue en Puerto 80
+
+### ⚡ Setup Rápido (5 minutos)
+
+```bash
+cd /var/www/html/apielectoral
+chmod +x setup_port_80.sh
+sudo ./setup_port_80.sh
+```
+
+**Arquitectura:** Internet (Puerto 80) → Nginx → FastAPI (Puerto 8000)
+
+📖 **Guía completa:** [QUICK_START_PORT_80.md](QUICK_START_PORT_80.md)
+
+---
+
 ## 🚀 Inicio Rápido
 
 ### Instalación Local
@@ -38,6 +54,7 @@ La API estará disponible en: http://localhost:8000
 
 | Documento | Descripción | Tiempo |
 |-----------|-------------|--------|
+| **[DEPLOY_PORT_80.md](DEPLOY_PORT_80.md)** | 🌐 **Despliegue en puerto 80 con Nginx** | 15-20 min |
 | **[PASOS_INMEDIATOS.md](PASOS_INMEDIATOS.md)** | ⚡ Solución paso a paso a errores actuales | 10-15 min |
 | **[QUICK_FIX.md](QUICK_FIX.md)** | 🔧 Configuración rápida de secrets | 5 min |
 | **[SOLUCION_ERRORES_GITHUB_ACTIONS.md](SOLUCION_ERRORES_GITHUB_ACTIONS.md)** | 📖 Guía completa de troubleshooting | 20-30 min |

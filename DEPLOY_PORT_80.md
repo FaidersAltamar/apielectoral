@@ -1,114 +1,150 @@
-# Despliegue de API en Puerto 80
+# Despliegue de API en Puerto 80 con Nginx
 
 ## 📋 Resumen
 
-La API FastAPI ahora está configurada para correr **directamente en el puerto 80** sin nginx como proxy reverso.
+La API FastAPI corre en el **puerto 8000** internamente, y **nginx** actúa como proxy reverso en el **puerto 80**.
 
-## ⚙️ Cambios Realizados
+## ⚙️ Arquitectura
 
-### 1. `api-electoral.service`
-- Puerto cambiado de `8000` a `80`
-- Agregadas capacidades `CAP_NET_BIND_SERVICE` para permitir bind al puerto 80 sin root
+```
+Internet (Puerto 80) → Nginx → FastAPI (Puerto 8000)
+```
 
-### 2. `deploy.sh`
-- Agregado paso para detener y desactivar nginx automáticamente
-- Libera el puerto 80 antes de iniciar la API
+### Ventajas de usar Nginx como Proxy Reverso:
+- ✅ Mejor rendimiento y manejo de conexiones
+- ✅ Fácil agregar SSL/HTTPS en el futuro
+- ✅ Protección contra ataques DDoS
+- ✅ Compresión gzip automática
+- ✅ Balanceo de carga (si escalas)
+- ✅ Servir múltiples aplicaciones en el mismo servidor
 
 ## 🚀 Pasos para Desplegar
 
-### Opción A: Usando el script de deploy (Recomendado)
+### Paso 1: Copiar configuración de Nginx
 
 ```bash
-cd /var/www/html/apielectoral
-./deploy.sh
+# Copiar archivo de configuración
+sudo cp /var/www/html/apielectoral/nginx.conf /etc/nginx/sites-available/api-electoral
+
+# Crear enlace simbólico
+sudo ln -sf /etc/nginx/sites-available/api-electoral /etc/nginx/sites-enabled/
+
+# Eliminar configuración default si existe
+sudo rm -f /etc/nginx/sites-enabled/default
+
+# Verificar configuración
+sudo nginx -t
 ```
 
-El script automáticamente:
-1. Detendrá nginx
-2. Actualizará el código
-3. Instalará dependencias
-4. Reiniciará el servicio en puerto 80
-
-### Opción B: Manual
+### Paso 2: Configurar el servicio de FastAPI
 
 ```bash
-# 1. Detener nginx
-sudo systemctl stop nginx
-sudo systemctl disable nginx
+# Copiar archivo de servicio
+sudo cp /var/www/html/apielectoral/api-electoral.service /etc/systemd/system/
 
-# 2. Actualizar código
-cd /var/www/html/apielectoral
-git pull
-
-# 3. Copiar archivo de servicio
-sudo cp api-electoral.service /etc/systemd/system/
-
-# 4. Recargar y reiniciar
+# Recargar systemd
 sudo systemctl daemon-reload
-sudo systemctl restart api-electoral
 
-# 5. Verificar estado
+# Habilitar servicio para que inicie automáticamente
+sudo systemctl enable api-electoral
+```
+
+### Paso 3: Iniciar servicios
+
+```bash
+# Iniciar FastAPI
+sudo systemctl start api-electoral
+
+# Reiniciar Nginx
+sudo systemctl restart nginx
+```
+
+### Paso 4: Verificar estado
+
+```bash
+# Verificar FastAPI
 sudo systemctl status api-electoral
+
+# Verificar Nginx
+sudo systemctl status nginx
 ```
 
 ## 🔍 Verificación
 
-### Verificar que el servicio está corriendo:
+### 1. Verificar que FastAPI está corriendo en puerto 8000:
 ```bash
 sudo systemctl status api-electoral
+sudo ss -tulpn | grep :8000
 ```
 
-### Verificar que el puerto 80 está en uso:
+### 2. Verificar que Nginx está en puerto 80:
 ```bash
-sudo netstat -tulpn | grep :80
-# o
+sudo systemctl status nginx
 sudo ss -tulpn | grep :80
 ```
 
-### Probar la API:
+### 3. Probar la API desde el navegador:
 ```bash
-curl http://localhost/docs
-# o desde tu navegador
+# Documentación interactiva
 http://tu-servidor-ip/docs
+
+# Health check
+curl http://localhost/health
+
+# Balance de 2captcha
+curl http://localhost/balance
 ```
 
-## ⚠️ Consideraciones Importantes
+### 4. Ver logs en tiempo real:
+```bash
+# Logs de FastAPI
+sudo journalctl -u api-electoral -f
 
-### Ventajas de Puerto 80 Directo:
-- ✅ Acceso directo sin proxy
-- ✅ Menos componentes = menos complejidad
-- ✅ Menor latencia (sin capa intermedia)
+# Logs de Nginx
+sudo tail -f /var/log/nginx/api-electoral-access.log
+sudo tail -f /var/log/nginx/api-electoral-error.log
+```
 
-### Desventajas:
-- ❌ No hay SSL/HTTPS (puerto 443)
-- ❌ No hay balanceo de carga
-- ❌ No hay cache de nginx
-- ❌ No puedes servir múltiples aplicaciones
+## 🔒 Agregar HTTPS con Let's Encrypt (Recomendado para Producción)
 
-## 🔒 Para Agregar HTTPS (Opcional)
-
-Si necesitas HTTPS en el futuro, tendrás que:
-
-1. **Reactivar nginx** y configurarlo como proxy reverso
-2. **Usar Certbot** para obtener certificados SSL
-3. **Cambiar la API** de vuelta al puerto 8000
-
-O alternativamente:
-
-1. **Usar uvicorn con SSL** directamente (no recomendado para producción)
-
-## 🔄 Revertir a Nginx (Si es necesario)
-
-Si quieres volver a usar nginx como proxy:
+### Paso 1: Instalar Certbot
 
 ```bash
-# 1. Cambiar puerto en api-electoral.service a 8000
-# 2. Reactivar nginx
-sudo systemctl enable nginx
-sudo systemctl start nginx
+sudo apt update
+sudo apt install certbot python3-certbot-nginx -y
+```
 
-# 3. Reiniciar API
-sudo systemctl restart api-electoral
+### Paso 2: Obtener certificado SSL
+
+```bash
+# Reemplaza tu-dominio.com con tu dominio real
+sudo certbot --nginx -d tu-dominio.com -d www.tu-dominio.com
+```
+
+### Paso 3: Actualizar nginx.conf
+
+Descomentar la sección HTTPS en `nginx.conf` y actualizar con tu dominio:
+
+```bash
+# Editar nginx.conf
+sudo nano /etc/nginx/sites-available/api-electoral
+
+# Descomentar las líneas de HTTPS (líneas 40-77)
+# Reemplazar "your-domain.com" con tu dominio real
+```
+
+### Paso 4: Reiniciar Nginx
+
+```bash
+sudo nginx -t
+sudo systemctl reload nginx
+```
+
+### Paso 5: Verificar renovación automática
+
+```bash
+# Certbot configura renovación automática
+sudo certbot renew --dry-run
 ```
 
 ## 📝 Logs
@@ -124,18 +160,29 @@ sudo journalctl -u api-electoral -f
 
 ## 🆘 Troubleshooting
 
-### Error: "Address already in use"
+### Error: "Address already in use" en puerto 80
 ```bash
 # Ver qué está usando el puerto 80
+sudo ss -tulpn | grep :80
 sudo lsof -i :80
-# o
-sudo netstat -tulpn | grep :80
 
-# Si es nginx, detenerlo
-sudo systemctl stop nginx
+# Si hay otro servicio, detenerlo
+sudo systemctl stop apache2  # Si tienes Apache
+sudo systemctl stop nginx    # Para reiniciar nginx
+sudo systemctl start nginx
 ```
 
-### El servicio no inicia
+### Error: "Address already in use" en puerto 8000
+```bash
+# Ver qué está usando el puerto 8000
+sudo ss -tulpn | grep :8000
+
+# Detener el servicio de FastAPI
+sudo systemctl stop api-electoral
+sudo systemctl start api-electoral
+```
+
+### El servicio FastAPI no inicia
 ```bash
 # Ver logs detallados
 sudo journalctl -u api-electoral -n 100 --no-pager
@@ -145,4 +192,83 @@ ls -la /var/www/html/apielectoral/
 
 # Verificar archivo de servicio
 sudo systemctl cat api-electoral
+
+# Verificar que el entorno virtual existe
+ls -la /var/www/html/apielectoral/venv/
+
+# Verificar que uvicorn está instalado
+/var/www/html/apielectoral/venv/bin/uvicorn --version
+```
+
+### Nginx retorna 502 Bad Gateway
+```bash
+# Verificar que FastAPI está corriendo
+sudo systemctl status api-electoral
+
+# Verificar conectividad local
+curl http://127.0.0.1:8000/docs
+
+# Ver logs de nginx
+sudo tail -f /var/log/nginx/api-electoral-error.log
+```
+
+### Nginx no inicia
+```bash
+# Verificar sintaxis de configuración
+sudo nginx -t
+
+# Ver logs de nginx
+sudo journalctl -u nginx -n 50
+
+# Verificar que el archivo de configuración existe
+ls -la /etc/nginx/sites-enabled/api-electoral
+```
+
+### Cambios no se reflejan
+```bash
+# Reiniciar ambos servicios
+sudo systemctl restart api-electoral
+sudo systemctl reload nginx
+
+# Limpiar cache del navegador o usar modo incógnito
+```
+
+## 🔄 Comandos Útiles
+
+### Reiniciar servicios
+```bash
+# Reiniciar solo FastAPI
+sudo systemctl restart api-electoral
+
+# Reiniciar solo Nginx (sin downtime)
+sudo systemctl reload nginx
+
+# Reiniciar Nginx (con downtime)
+sudo systemctl restart nginx
+
+# Reiniciar ambos
+sudo systemctl restart api-electoral nginx
+```
+
+### Ver estado de servicios
+```bash
+# Estado de FastAPI
+sudo systemctl status api-electoral
+
+# Estado de Nginx
+sudo systemctl status nginx
+
+# Ver todos los servicios activos
+sudo systemctl list-units --type=service --state=running
+```
+
+### Habilitar/Deshabilitar inicio automático
+```bash
+# Habilitar inicio automático
+sudo systemctl enable api-electoral
+sudo systemctl enable nginx
+
+# Deshabilitar inicio automático
+sudo systemctl disable api-electoral
+sudo systemctl disable nginx
 ```
