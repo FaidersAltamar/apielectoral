@@ -18,6 +18,26 @@ sudo ./setup_port_80.sh
 
 ---
 
+## 🔒 Agregar HTTPS (Recomendado para Producción)
+
+### ⚡ Setup HTTPS con Let's Encrypt (5 minutos)
+
+**Prerequisito:** Tener un dominio apuntando a tu servidor
+
+```bash
+cd /var/www/html/apielectoral
+chmod +x setup_https.sh
+sudo ./setup_https.sh
+```
+
+**Arquitectura Final:** Internet (HTTPS/443) → Nginx + SSL → FastAPI (8000)
+
+📖 **Guías:**
+- [HTTPS_QUICK_START.md](HTTPS_QUICK_START.md) - Setup rápido (5 min)
+- [GUIA_COMPLETA_DEPLOYMENT.md](GUIA_COMPLETA_DEPLOYMENT.md) - De cero a producción
+
+---
+
 ## 🚀 Inicio Rápido
 
 ### Instalación Local
@@ -54,7 +74,12 @@ La API estará disponible en: http://localhost:8000
 
 | Documento | Descripción | Tiempo |
 |-----------|-------------|--------|
-| **[DEPLOY_PORT_80.md](DEPLOY_PORT_80.md)** | 🌐 **Despliegue en puerto 80 con Nginx** | 15-20 min |
+| **[GUIA_COMPLETA_DEPLOYMENT.md](GUIA_COMPLETA_DEPLOYMENT.md)** | 🚀 **De cero a producción con HTTPS** | 30-40 min |
+| **[HTTPS_QUICK_START.md](HTTPS_QUICK_START.md)** | 🔒 Setup HTTPS con Let's Encrypt | 5 min |
+| **[CONFIGURACION_HTTPS.md](CONFIGURACION_HTTPS.md)** | 🔐 Guía completa de HTTPS y SSL/TLS | 15-20 min |
+| **[DEPLOY_PORT_80.md](DEPLOY_PORT_80.md)** | 🌐 Despliegue en puerto 80 con Nginx | 15-20 min |
+| **[QUICK_START_PORT_80.md](QUICK_START_PORT_80.md)** | ⚡ Inicio rápido puerto 80 | 5 min |
+| **[RESUMEN_HTTPS.md](RESUMEN_HTTPS.md)** | 📋 Resumen configuración HTTPS | - |
 | **[PASOS_INMEDIATOS.md](PASOS_INMEDIATOS.md)** | ⚡ Solución paso a paso a errores actuales | 10-15 min |
 | **[QUICK_FIX.md](QUICK_FIX.md)** | 🔧 Configuración rápida de secrets | 5 min |
 | **[SOLUCION_ERRORES_GITHUB_ACTIONS.md](SOLUCION_ERRORES_GITHUB_ACTIONS.md)** | 📖 Guía completa de troubleshooting | 20-30 min |
@@ -62,13 +87,16 @@ La API estará disponible en: http://localhost:8000
 | **[VPS_SETUP.md](VPS_SETUP.md)** | 🖥️ Configuración completa del servidor | 30-60 min |
 | **[PRODUCTION_DEPLOYMENT.md](PRODUCTION_DEPLOYMENT.md)** | 🚀 Deployment en producción | 60+ min |
 | **[ARCHITECTURE.md](ARCHITECTURE.md)** | 🏗️ Arquitectura del proyecto | - |
+| **[RESUMEN_CONFIGURACION.md](RESUMEN_CONFIGURACION.md)** | 📋 Resumen técnico completo | - |
 
 ### 🛠️ Scripts Útiles
 
 | Script | Descripción | Uso |
 |--------|-------------|-----|
-| **[setup_server.sh](setup_server.sh)** | Configuración automática del servidor | `bash setup_server.sh` |
-| **[check_server_setup.sh](check_server_setup.sh)** | Verificar configuración del servidor | `bash check_server_setup.sh` |
+| **[setup_port_80.sh](setup_port_80.sh)** | Setup completo puerto 80 con Nginx | `sudo ./setup_port_80.sh` |
+| **[setup_https.sh](setup_https.sh)** | Setup HTTPS con Let's Encrypt | `sudo ./setup_https.sh` |
+| **[deploy.sh](deploy.sh)** | Deploy/actualizar aplicación | `./deploy.sh` |
+| **[VERIFICACION.sh](VERIFICACION.sh)** | Verificar estado del sistema | `./VERIFICACION.sh` |
 
 ## 🔥 Solución Rápida a Errores Comunes
 
