@@ -48,22 +48,11 @@ jobs:
             echo "💾 Stashing local changes..."
             git stash
             
-            # Configure SSH for Git
-            echo "🔑 Setting up SSH key for Git..."
-            mkdir -p ~/.ssh
-            echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_rsa
-            chmod 600 ~/.ssh/id_rsa
-            
-            # Always ensure GitHub host key is in known_hosts
-            echo "🔐 Adding GitHub to known hosts..."
-            ssh-keyscan -H github.com >> ~/.ssh/known_hosts 2>/dev/null || true
-            chmod 644 ~/.ssh/known_hosts
-            
-            # Change remote to SSH if it's HTTPS
+            # Ensure remote is HTTPS
             CURRENT_REMOTE=$(git remote get-url origin)
-            if [[ "$CURRENT_REMOTE" == https* ]]; then
-              echo "🔄 Switching to SSH remote..."
-              git remote set-url origin git@github.com:almanza023/apielectoral.git
+            if [[ "$CURRENT_REMOTE" == git@* ]]; then
+              echo "🔄 Switching to HTTPS remote..."
+              git remote set-url origin https://github.com/almanza023/apielectoral.git
             fi
             
             # Pull latest changes
