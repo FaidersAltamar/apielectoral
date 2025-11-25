@@ -677,12 +677,24 @@ async def get_solo_name_sequential(request: PeticionRequest):
         response_time_seconds, execution_time = calculate_response_time(start_time)
         
         if name:
-            return {
+            # Enviar al API externo si está habilitado
+            api_response = {}
+            if request.enviarapi:
+                print(f"📤 Enviando nombre al API externo...")
+                api_response = send_name_to_external_api(request.nuip, name)
+            
+            response_data = {
                 "status": "success",
                 "name": name,
                 "source": source,
                 "execution_time": execution_time
             }
+            
+            # Incluir respuesta del API externo si se envió
+            if api_response:
+                response_data["api_externa"] = api_response
+                
+            return response_data
         else:
             return {
                 "status": "not_found",
