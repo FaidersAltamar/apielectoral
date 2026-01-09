@@ -56,10 +56,14 @@ class ProcuraduriaScraperAuto:
             return None
     
     def extract_form_data(self, soup):
-        """Extrae todos los campos hidden y viewstate del formulario ASP.NET"""
+        """Extrae todos los campos hidden y viewstate del formulario ASP.NET
+
+        Además devuelve la URL del atributo `action` del formulario (resuelta a absoluta)
+        bajo la clave interna `_form_action` para usarla al enviar el POST.
+        """
         try:
             form_data = {}
-            
+
             # Buscar todos los inputs hidden (crítico para ASP.NET)
             hidden_inputs = soup.find_all('input', type='hidden')
             for hidden in hidden_inputs:
@@ -67,8 +71,23 @@ class ProcuraduriaScraperAuto:
                 value = hidden.get('value', '')
                 if name:
                     form_data[name] = value
-            
+
+            # Resolver el action del formulario (si existe)
+            form_tag = soup.find('form')
+            action_url = None
+            if form_tag and form_tag.get('action'):
+                try:
+                    from urllib.parse import urljoin
+                    action = form_tag.get('action')
+                    action_url = urljoin(self.base_url, action)
+                    form_data['_form_action'] = action_url
+                except Exception:
+                    # Si falla resolución, no es crítico; se usará base_url
+                    form_data['_form_action'] = self.base_url
+
             print(f"✅ Extraídos {len(form_data)} campos del formulario")
+            if action_url:
+                print(f"🔗 URL del action del formulario: {action_url}")
             return form_data
         except Exception as e:
             print(f"❌ Error al extraer datos del formulario: {e}")
@@ -181,10 +200,14 @@ class ProcuraduriaScraperAuto:
         return None
     
     def submit_form(self, numero_id, respuesta_captcha, form_data):
-        """Envía el formulario de consulta con POST request"""
+        """Envía el formulario de consulta con POST request.
+
+        Ahora se usa la URL del atributo `action` del formulario (si existe) para el POST
+        y se preservan todos los campos hidden extraídos.
+        """
         try:
             print("📤 Enviando formulario de consulta...")
-            
+
             # Preparar datos del formulario
             post_data = form_data.copy()
             post_data.update({
@@ -195,32 +218,36 @@ class ProcuraduriaScraperAuto:
                 '__EVENTTARGET': '',
                 '__EVENTARGUMENT': ''
             })
-            
+
             print(f"🔍 Datos del formulario a enviar:")
             print(f"   - Tipo ID: 1")
             print(f"   - Número ID: {numero_id}")
             print(f"   - Respuesta Captcha: {respuesta_captcha}")
-            
+
+            # Determinar la URL destino: usar el action del form si fue extraído
+            target_url = post_data.get('_form_action', self.base_url)
+            print(f"🔗 Enviando POST a: {target_url}")
+
             # Actualizar headers para el POST
             headers = self.session.headers.copy()
             headers.update({
                 'Content-Type': 'application/x-www-form-urlencoded',
                 'Origin': 'https://apps.procuraduria.gov.co',
-                'Referer': self.base_url
+                'Referer': target_url
             })
-            
+
             # Enviar formulario
             print("⏳ Enviando POST request y esperando respuesta del servidor...")
             response = self.session.post(
-                self.base_url,
+                target_url,
                 data=post_data,
                 headers=headers,
                 timeout=30  # Aumentado a 30 segundos para dar más tiempo
             )
-            
+
             response.raise_for_status()
             print("✅ Respuesta recibida del servidor")
-            
+
             # Esperar 5 segundos adicionales por si acaso
             print("⏳ Esperando 5 segundos adicionales...")
             time.sleep(5)
@@ -235,24 +262,24 @@ class ProcuraduriaScraperAuto:
             print(f"🔍 Últimos 1000 caracteres:")
             print(response.text[-1000:])
             print(f"{'='*80}\n")
-            
+
             return response.text
-            
+
         except requests.RequestException as e:
             print(f"❌ Error al enviar formulario: {e}")
             return None
     
     def extract_result_data(self, html_content):
-        """Extrae los datos del resultado de la consulta"""
+        """Extrae los datos del resultado de la consulta (más robusto)."""
         try:
             print("📊 Extrayendo datos del resultado...")
             print(f"🔍 Longitud del HTML recibido: {len(html_content)} caracteres")
-            
+
             soup = BeautifulSoup(html_content, 'html.parser')
-            
+
             # Buscar el div con clase 'datosConsultado'
             datos_element = soup.find('div', class_='datosConsultado')
-            
+
             if not datos_element:
                 print("⚠️ No se encontró el elemento 'datosConsultado'")
                 print(f"🔍 Primeros 500 caracteres del HTML:")
@@ -264,32 +291,104 @@ class ProcuraduriaScraperAuto:
                 for i, div in enumerate(all_divs):
                     print(f"   Div {i}: class='{div.get('class')}', text='{div.get_text(strip=True)[:50]}'")
                 return None
-            
-            # Extraer el texto completo
-            texto_completo = datos_element.get_text(strip=True)
+
+            # Extraer el texto completo (con separadores para facilitar separación en líneas)
+            texto_completo = datos_element.get_text(separator="\n", strip=True)
             print(f"📄 Texto completo capturado ({len(texto_completo)} caracteres):")
             print(f"   {texto_completo}")
             print(f"\n🔍 HTML del elemento 'datosConsultado':")
             print(f"   {datos_element.prettify()[:500]}")
-            
-            # Extraer los spans que contienen el nombre
+
+            # Intentar extraer el nombre de forma progresiva usando varias heurísticas
             nombre_completo = None
+
+            # 1) Intento clásico: spans (primer nombre, segundo nombre, primer apellido, segundo apellido)
             try:
                 spans = datos_element.find_all('span')
                 print(f"🔍 Encontrados {len(spans)} spans en 'datosConsultado'")
                 for i, span in enumerate(spans[:10]):
                     print(f"   Span {i}: '{span.get_text(strip=True)}'")
-                
+
                 if len(spans) >= 4:
-                    # Los primeros 4 spans contienen: primer nombre, segundo nombre, primer apellido, segundo apellido
                     nombres = [span.get_text(strip=True) for span in spans[:4] if span.get_text(strip=True)]
-                    nombre_completo = " ".join(nombres)
-                    print(f"✅ Nombre extraído: {nombre_completo}")
+                    if nombres:
+                        nombre_completo = " ".join(nombres)
+                        print(f"✅ Nombre extraído (spans): {nombre_completo}")
                 else:
                     print(f"⚠️ Se esperaban al menos 4 spans, se encontraron {len(spans)}")
             except Exception as e:
-                print(f"⚠️ Error extrayendo nombre: {e}")
-            
+                print(f"⚠️ Error extrayendo nombre por spans: {e}")
+
+            # 2) Buscar etiquetas con la palabra 'Nombre' o 'Nombres'
+            if not nombre_completo:
+                try:
+                    label_elems = datos_element.find_all(text=re.compile(r'nombre', re.I))
+                    for text_node in label_elems:
+                        parent = text_node.parent
+                        # Subir de nivel si el nodo está en una etiqueta pequeña (ej. <strong>) para obtener el texto contiguo
+                        container = parent
+                        while container and len(container.get_text(strip=True)) <= len(text_node.strip()) and container.parent:
+                            container = container.parent
+                        if container is None:
+                            container = parent
+                        parent_text = container.get_text(separator=" ", strip=True)
+                        # Buscar patrón 'Nombre: ...' usando regex
+                        m = re.search(r'nombre(?:s)?\s*[:\-]*\s*(.+)', parent_text, re.I)
+                        if m:
+                            candidate = m.group(1).strip()
+                            # Limpiar si contiene palabras que indican estado
+                            if candidate and not re.search(r'antecedente|registro|consulta', candidate, re.I):
+                                # Rechazar casos como 'sin nombre', 'visible', 'señor(a)', etc.
+                                if len(candidate.split()) >= 2 and not re.search(r"\b(sin|señor|señora|identificado|visible|no)\b", candidate, re.I):
+                                    nombre_completo = candidate
+                                    print(f"✅ Nombre extraído (label): {nombre_completo}")
+                                    break
+                                else:
+                                    print(f"⚠️ Candidate descartado por heurística (label): '{candidate}'")
+                                    continue
+                except Exception as e:
+                    print(f"⚠️ Error buscando label 'Nombre': {e}")
+
+            # 3) Buscar en tablas (td siguiente a td que contenga 'Nombre')
+            if not nombre_completo:
+                try:
+                    tds = datos_element.find_all('td')
+                    for i in range(len(tds) - 1):
+                        key = tds[i].get_text(strip=True).lower()
+                        if 'nombre' in key:
+                            candidate = tds[i + 1].get_text(separator=' ', strip=True)
+                            if candidate:
+                                nombre_completo = candidate
+                                print(f"✅ Nombre extraído (tabla): {nombre_completo}")
+                                break
+                except Exception as e:
+                    print(f"⚠️ Error buscando en tablas: {e}")
+
+            # 4) Fallback heurístico: buscar el fragmento de texto más largo que parezca un nombre
+            if not nombre_completo:
+                try:
+                    candidates = []
+                    for part in datos_element.stripped_strings:
+                        s = part.strip()
+                        if len(s) > 3 and 'antecedente' not in s.lower():
+                            # Must contain at least one space (first + last)
+                            if len(s.split()) >= 2:
+                                candidates.append(s)
+                    # Filtrar frases que parezcan estados
+                    candidates = [c for c in candidates if not re.search(r'no registra|registra antecedentes|tiene antecedentes|consulta', c, re.I)]
+                    if candidates:
+                        # Filtrar candidatos que contienen palabras que no son nombres
+                        filtered = [c for c in candidates if not re.search(r"\b(sin|señor|señora|identificado|visible|no|ciudadad|ciudadanía|cédula|cedula|número|numero|documento)\b", c, re.I)]
+                        if filtered:
+                            nombre_completo = max(filtered, key=lambda x: len(x))
+                            print(f"✅ Nombre extraído (heurística): {nombre_completo}")
+                        else:
+                            print("⚠️ Ningún candidato heurístico válido después del filtrado")
+                except Exception as e:
+                    print(f"⚠️ Error heurístico extrayendo nombre: {e}")
+
+
+
             # Determinar si tiene antecedentes
             texto_lower = texto_completo.lower()
             if "no registra antecedentes" in texto_lower or "no tiene antecedentes" in texto_lower:
@@ -301,14 +400,14 @@ class ProcuraduriaScraperAuto:
             else:
                 estado_antecedentes = "consultado"
                 mensaje = "Consulta realizada exitosamente"
-            
+
             return {
                 "tipo": estado_antecedentes,
                 "mensaje": mensaje,
                 "nombre_completo": nombre_completo,
                 "texto_completo": texto_completo
             }
-            
+
         except Exception as e:
             print(f"❌ Error al extraer datos del resultado: {e}")
             return None
@@ -511,6 +610,9 @@ def save_procuraduria_results(data, filename=None):
     
     print(f"💾 Resultados guardados en: {filename}")
     return filename
+
+
+
 
 
 # Ejemplo de uso
