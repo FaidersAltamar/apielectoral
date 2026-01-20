@@ -168,6 +168,61 @@ class RegistraduriaScraperAuto:
             print(html_content[:1000])
             print(f"🔍 Últimos 500 caracteres del contenido:")
             print(html_content[-500:])
+
+            # Detectar estado "no habilitado" y normalizar la respuesta
+            if re.search(r"no se encuentra habilitado para votar", html_content, re.IGNORECASE):
+                print("⚠️ El ciudadano no está habilitado para votar, devolviendo valores normalizados")
+                blocked_value = "NO HABILITADO PARA VOTAR"
+
+                # Intentar extraer el NUIP del HTML para devolverlo
+                nuip_blocked = None
+                nuip_match_blocked = re.search(r"NUIP[^0-9]{0,20}(\d{6,12})", html_content, re.IGNORECASE)
+                if not nuip_match_blocked:
+                    nuip_match_blocked = re.search(r">(\d{6,12})<\\/td>", html_content)
+                if nuip_match_blocked:
+                    nuip_blocked = nuip_match_blocked.group(1)
+
+                blocked_data = [{
+                    'NUIP': nuip_blocked if nuip_blocked else blocked_value,
+                    'DEPARTAMENTO': blocked_value,
+                    'MUNICIPIO': blocked_value,
+                    'PUESTO': blocked_value,
+                    'DIRECCIÓN': blocked_value,
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": blocked_data,
+                    "total_records": 1
+                }
+
+            # Detectar estado "no censo" y normalizar la respuesta
+            if re.search(r"no se encuentra en el censo", html_content, re.IGNORECASE):
+                print("⚠️ El ciudadano no está en el censo, devolviendo valores normalizados")
+                census_value = "NO CENSO"
+
+                nuip_census = None
+                nuip_match_census = re.search(r"(\d{6,12})", html_content)
+                if nuip_match_census:
+                    nuip_census = nuip_match_census.group(1)
+
+                census_data = [{
+                    'NUIP': nuip_census if nuip_census else census_value,
+                    'DEPARTAMENTO': census_value,
+                    'MUNICIPIO': census_value,
+                    'PUESTO': census_value,
+                    'DIRECCIÓN': census_value,
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": census_data,
+                    "total_records": 1
+                }
             
             # Función auxiliar para limpiar valores extraídos
             def clean_value(value):

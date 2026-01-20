@@ -33,6 +33,8 @@ from scrapper.registraduria_scraper import RegistraduriaScraperAuto, save_regist
 from scrapper.police_scraper import PoliciaScraperAuto, save_police_results 
 from scrapper.procuraduria_scraper import ProcuraduriaScraperAuto, save_procuraduria_results
 from scrapper.sisben_scraper import SisbenScraperAuto, save_sisben_results
+from scrapper.adres_scraper import AdresScraperAuto, save_adres_results
+from scrapper.policiajudicial_scraper import PoliciaJudicialScraper, save_policia_results
 
 # Crear la aplicación FastAPI
 app = FastAPI(
@@ -172,6 +174,96 @@ async def get_sisben_data(request: PeticionRequest):
         scraper = SisbenScraperAuto(headless=True)
         result = scraper.scrape_name_by_nuip(request.nuip)
         return result    
+    except Exception as e:
+        response_time_seconds, execution_time = calculate_response_time(start_time)
+        
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"Error al procesar la consulta: {str(e)}",
+                "response_time_seconds": response_time_seconds,
+                "execution_time": execution_time
+            }
+        )
+    finally:
+        if scraper:
+            scraper.close()
+
+@app.post("/consultar-nombres-v4")
+async def get_adres_data(request: PeticionRequest):
+    """
+    Consulta nombre en ADRES
+    
+    Args:
+        request.nuip: Número de identificación
+        request.enviarapi: Si es True, envía el nombre al API externo
+    """
+    start_time = time.time()
+    scraper = None
+    try:
+        scraper = AdresScraperAuto(API_KEY)
+        result = scraper.scrape_nuip(request.nuip)
+
+        # Construir campo 'name' a partir de NOMBRES y APELLIDOS si existe
+        nombres = (result.get('NOMBRES') or '').strip()
+        apellidos = (result.get('APELLIDOS') or '').strip()
+        full_name = ' '.join([x for x in [nombres, apellidos] if x]).strip()
+        if full_name:
+            result['name'] = full_name
+
+        # Si enviarapi es True y se encontró el nombre, enviar al API externo
+        if request.enviarapi and result.get("status") == "success":
+            nombre = result.get("name", "")
+            if nombre and nombre.strip():
+                print(f"📤 Enviando nombre al API externo (v4)...")
+                api_response = send_name_to_external_api(request.nuip, nombre.strip())
+                result["api_externa"] = api_response
+
+        return result
+    except Exception as e:
+        response_time_seconds, execution_time = calculate_response_time(start_time)
+        
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": f"Error al procesar la consulta: {str(e)}",
+                "response_time_seconds": response_time_seconds,
+                "execution_time": execution_time
+            }
+        )
+    finally:
+        if scraper:
+            scraper.close()
+
+@app.post("/consultar-nombres-v5")
+async def get_policiajudicial_data(request: PeticionRequest):
+    """
+    Consulta nombre en Policía Judicial (WebJudicial)
+
+    Args:
+        request.nuip: Número de identificación
+        request.enviarapi: Si es True, envía el nombre al API externo
+    """
+    start_time = time.time()
+    scraper = None
+    try:
+        scraper = PoliciaJudicialScraper(API_KEY)
+        result = scraper.scrape_nuip(request.nuip)
+
+        # Construir campo 'name' a partir de NOMBRES si existe
+        nombres = (result.get('NOMBRES') or '').strip()
+        if nombres:
+            result['name'] = nombres
+
+        # Si enviarapi es True y se encontró el nombre, enviar al API externo
+        if request.enviarapi and result.get("status") == "success":
+            nombre = result.get("name", "")
+            if nombre and nombre.strip():
+                print(f"📤 Enviando nombre al API externo (v5)...")
+                api_response = send_name_to_external_api(request.nuip, nombre.strip())
+                result["api_externa"] = api_response
+
+        return result
     except Exception as e:
         response_time_seconds, execution_time = calculate_response_time(start_time)
         
