@@ -436,16 +436,17 @@ def send_voting_place_to_external_api(numero_documento: str, voting_data: dict) 
             "puesto_api_error": str(e)
         }
 
-async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
+async def process_single_nuip(nuip: str, enviarapi: bool = False, consultarpuesto: bool = True) -> dict:
     """
     Procesa un solo NUIP buscando el nombre en orden:
     1. Sisben
     2. Procuraduría (si no se encontró en Sisben)
-    3. Registraduría (SIEMPRE consulta puesto de votación, independientemente si se encontró nombre o no)
+    3. Registraduría (consulta puesto de votación solo si consultarpuesto=True)
     
     Args:
         nuip: Número de identificación a consultar
         enviarapi: Si es True, envía los datos al API externo
+        consultarpuesto: Si es True, consulta el puesto de votación en Registraduría
     
     Returns:
         dict: Resultado de la consulta con nombre, voting_place, source y respuesta del API externo
@@ -530,39 +531,42 @@ async def process_single_nuip(nuip: str, enviarapi: bool = False) -> dict:
             print(f"📤 Enviando nombre al API externo...")
             nombre_response = send_name_to_external_api(nuip, name)
         
-        # 4. SIEMPRE consultar puesto de votación en registraduría (independientemente si se encontró nombre o no)
+        # 4. Consultar puesto de votación en registraduría solo si consultarpuesto=True
         voting_data = None
-        scraper_registraduria = None
-        try:
-            print(f"🗳️ Consultando puesto de votación para {nuip}...")
-            scraper_registraduria = RegistraduriaScraperAuto(API_KEY)
-            
-            # Usar asyncio.wait_for para timeout de 120 segundos
-            voting_result = await asyncio.wait_for(
-                asyncio.to_thread(scraper_registraduria.scrape_nuip, nuip),
-                timeout=120.0
-            )
-            
-            if voting_result.get("status") == "success":
-                data_records = voting_result.get("data", [])
-                if data_records and len(data_records) > 0:
-                    voting_data = data_records[0]
-                    print(f"✅ Puesto de votación encontrado: {voting_data.get('PUESTO', 'N/A')}")
+        if consultarpuesto:
+            scraper_registraduria = None
+            try:
+                print(f"🗳️ Consultando puesto de votación para {nuip}...")
+                scraper_registraduria = RegistraduriaScraperAuto(API_KEY)
+                
+                # Usar asyncio.wait_for para timeout de 120 segundos
+                voting_result = await asyncio.wait_for(
+                    asyncio.to_thread(scraper_registraduria.scrape_nuip, nuip),
+                    timeout=120.0
+                )
+                
+                if voting_result.get("status") == "success":
+                    data_records = voting_result.get("data", [])
+                    if data_records and len(data_records) > 0:
+                        voting_data = data_records[0]
+                        print(f"✅ Puesto de votación encontrado: {voting_data.get('PUESTO', 'N/A')}")
+                    else:
+                        print(f"⚠️ No se encontró puesto de votación")
                 else:
-                    print(f"⚠️ No se encontró puesto de votación")
-            else:
-                print(f"⚠️ Error al consultar puesto de votación: {voting_result.get('message', 'Unknown')}")
-        except asyncio.TimeoutError:
-            print(f"⏱️ Timeout al consultar puesto de votación (120s excedidos)")
-            voting_data = None
-        except Exception as e:
-            print(f"⚠️ Error al consultar puesto de votación: {e}")
-        finally:
-            if scraper_registraduria:
-                try:
-                    scraper_registraduria.close()
-                except Exception as close_error:
-                    print(f"⚠️ Error al cerrar scraper de registraduría: {close_error}")
+                    print(f"⚠️ Error al consultar puesto de votación: {voting_result.get('message', 'Unknown')}")
+            except asyncio.TimeoutError:
+                print(f"⏱️ Timeout al consultar puesto de votación (120s excedidos)")
+                voting_data = None
+            except Exception as e:
+                print(f"⚠️ Error al consultar puesto de votación: {e}")
+            finally:
+                if scraper_registraduria:
+                    try:
+                        scraper_registraduria.close()
+                    except Exception as close_error:
+                        print(f"⚠️ Error al cerrar scraper de registraduría: {close_error}")
+        else:
+            print(f"⏭️ Saltando consulta de puesto de votación (consultarpuesto=False)")
         
         # 5. Enviar puesto de votación al endpoint externo (solo si enviarapi=True y se encontró)
         puesto_response = {}
@@ -623,13 +627,13 @@ async def get_name_sequential(request: ConsultaNombreRequest):
     Endpoint que busca nombres para múltiples NUIPs secuencialmente en:
     1. Sisben
     2. Procuraduría (si no se encontró en Sisben)
-    3. Registraduría (SIEMPRE consulta puesto de votación, independientemente si se encontró nombre o no)
+    3. Registraduría (consulta puesto de votación solo si consultarpuesto=True)
     
     Si encuentra el nombre, lo envía automáticamente al endpoint externo.
     Si encuentra puesto de votación, también lo envía al endpoint externo.
     
     Args:
-        request: Lista de NUIPs a consultar
+        request: Lista de NUIPs a consultar, enviarapi (bool), consultarpuesto (bool, default=True)
     
     Returns:
         dict: Lista de resultados con status, name, voting_place, execution_time, source para cada NUIP
@@ -648,6 +652,7 @@ async def get_name_sequential(request: ConsultaNombreRequest):
     print(f"{'='*60}")
     print(f"NUIPs: {request.nuips}")
     print(f"Total NUIPs: {len(request.nuips)}")
+    print(f"Consultar puesto: {request.consultarpuesto}")
     print(f"{'='*60}\n")
     
     print(f"\n📋 Procesando {len(request.nuips)} NUIPs...")
@@ -660,7 +665,7 @@ async def get_name_sequential(request: ConsultaNombreRequest):
         try:
             # Agregar timeout global por NUIP (6 minutos máximo)
             result = await asyncio.wait_for(
-                process_single_nuip(nuip, enviarapi=request.enviarapi),
+                process_single_nuip(nuip, enviarapi=request.enviarapi, consultarpuesto=request.consultarpuesto),
                 timeout=360.0
             )
             results.append(result)

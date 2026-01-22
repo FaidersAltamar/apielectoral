@@ -169,6 +169,34 @@ class RegistraduriaScraperAuto:
             print(f"🔍 Últimos 500 caracteres del contenido:")
             print(html_content[-500:])
 
+            # Detectar estado "Cancelada por Muerte" y normalizar la respuesta
+            if re.search(r"Cancelada por Muerte|CANCELADA POR MUERTE", html_content, re.IGNORECASE):
+                print("⚠️ Registro cancelado por muerte, devolviendo valores normalizados")
+                
+                # Intentar extraer el NUIP del HTML
+                nuip_muerte = None
+                nuip_match_muerte = re.search(r">(\d{6,12})<\\/td>", html_content)
+                if not nuip_match_muerte:
+                    nuip_match_muerte = re.search(r"(\d{6,12})", html_content)
+                if nuip_match_muerte:
+                    nuip_muerte = nuip_match_muerte.group(1)
+
+                muerte_data = [{
+                    'NUIP': nuip_muerte if nuip_muerte else "CANCELADA",
+                    'DEPARTAMENTO': 'NO HABILITA',
+                    'MUNICIPIO': 'NO HABILITA',
+                    'PUESTO': 'CANCELADA POR MUERTE',
+                    'DIRECCIÓN': 'NO HABILITADA',
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": muerte_data,
+                    "total_records": 1
+                }
+
             # Detectar estado "no habilitado" y normalizar la respuesta
             if re.search(r"no se encuentra habilitado para votar", html_content, re.IGNORECASE):
                 print("⚠️ El ciudadano no está habilitado para votar, devolviendo valores normalizados")

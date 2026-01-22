@@ -63,6 +63,7 @@ class BulkNameRequest(BaseModel):
 class ConsultaNombreRequest(BaseModel):
     nuips: List[str] = Field(..., description="Lista de NUIPs a consultar", min_items=1, max_items=100)
     enviarapi: bool = Field(default=False, description="Si es True, envía los datos al API externo")
+    consultarpuesto: bool = Field(default=True, description="Si es True, consulta el puesto de votación en Registraduría")
     
     @validator('nuips')
     def validate_nuips(cls, v):
