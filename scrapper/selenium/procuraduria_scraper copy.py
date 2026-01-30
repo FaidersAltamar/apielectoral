@@ -115,7 +115,7 @@ class ProcuraduriaScraperAuto:
             print("⏳ Esperando que la extensión se inicialice...")
             time.sleep(3)
     
-    def scrape_nuip(self, numero_id, max_retries=3):
+    def scrape_nuip(self, numero_id, max_retries=2):
         """
         Consulta los antecedentes en la Procuraduría con reintentos automáticos
         

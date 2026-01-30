@@ -313,7 +313,7 @@ class ProcuraduriaScraperAuto:
             print(f"❌ Error al extraer datos del resultado: {e}")
             return None
     
-    def scrape_nuip(self, numero_id, max_retries=3):
+    def scrape_nuip(self, numero_id, max_retries=2):
         """
         Consulta los antecedentes en la Procuraduría con reintentos automáticos
         

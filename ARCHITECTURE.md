@@ -165,7 +165,7 @@ tasks/
 - **Fuente**: SISBEN
 - **Datos**: Nombres completos
 - **Tecnología**: undetected-chromedriver
-- **Reintentos**: Hasta 3 intentos automáticos
+- **Reintentos**: Hasta 2 intentos automáticos
 
 ### 5. Utils (`utils/`)
 

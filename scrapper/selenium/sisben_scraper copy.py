@@ -104,7 +104,7 @@ class SisbenScraperAuto:
             print("⏳ Esperando que la extensión se inicialice...")
             time.sleep(3)
     
-    def scrape_name_by_nuip(self, nuip, max_retries=3):
+    def scrape_name_by_nuip(self, nuip, max_retries=2):
         """
         Consulta el nombre de una persona por NUIP con reintentos automáticos
         

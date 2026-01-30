@@ -120,7 +120,7 @@ class PoliciaScraperAuto:
             print(f"❌ Error al enviar formulario: {e}")
             return None
     
-    def scrape_name_by_nuip(self, nuip, fecha_expedicion, max_retries=3):
+    def scrape_name_by_nuip(self, nuip, fecha_expedicion, max_retries=2):
         """
         Consulta el nombre de una persona por NUIP y fecha de expedición
         
