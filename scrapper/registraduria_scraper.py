@@ -16,10 +16,12 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.captcha_solver import TwoCaptchaSolver
 
 class RegistraduriaScraperAuto:
-    def __init__(self, captcha_api_key):
+    def __init__(self, captcha_api_key, check_balance=True):
         self.captcha_solver = TwoCaptchaSolver(captcha_api_key)
         self.session = requests.Session()
         self.base_url = "https://wsp.registraduria.gov.co/censo/consultar/"
+        self.cached_site_key = None  # Caché del site key para evitar extraerlo cada vez
+        self.cached_form_data = None  # Caché de datos del formulario
         
         # Configurar headers para simular un navegador real
         self.session.headers.update({
@@ -31,12 +33,13 @@ class RegistraduriaScraperAuto:
             'Upgrade-Insecure-Requests': '1'
         })
         
-        # Verificar balance
-        balance_info = self.captcha_solver.get_balance()
-        if balance_info.get("success"):
-            print(f"💰 2captcha - {balance_info['balance_formatted']} ({balance_info['estimated_requests']} captchas disponibles)")
-        else:
-            print(f"⚠️ 2captcha - {balance_info.get('message', 'Error al obtener balance')}")
+        # Verificar balance solo si se solicita (para ahorrar tiempo)
+        if check_balance:
+            balance_info = self.captcha_solver.get_balance()
+            if balance_info.get("success"):
+                print(f"💰 2captcha - {balance_info['balance_formatted']} ({balance_info['estimated_requests']} captchas disponibles)")
+            else:
+                print(f"⚠️ 2captcha - {balance_info.get('message', 'Error al obtener balance')}")
     
     def get_page_content(self):
         """Obtiene el contenido HTML de la página"""
@@ -60,8 +63,13 @@ class RegistraduriaScraperAuto:
             return None
     
     def extract_form_data(self, soup):
-        """Extrae datos necesarios del formulario"""
+        """Extrae datos necesarios del formulario y los cachea"""
         try:
+            # Si ya tenemos los datos en caché, usarlos
+            if self.cached_form_data:
+                print("🔄 Usando datos del formulario en caché")
+                return self.cached_form_data.copy()
+            
             form_data = {}
             
             # Buscar todos los inputs hidden para incluirlos en el POST
@@ -71,6 +79,10 @@ class RegistraduriaScraperAuto:
                 value = hidden.get('value', '')
                 if name:
                     form_data[name] = value
+            
+            # Guardar en caché
+            self.cached_form_data = form_data.copy()
+            print(f"💾 Datos del formulario guardados en caché ({len(form_data)} campos)")
             
             return form_data
         except Exception as e:
@@ -99,14 +111,20 @@ class RegistraduriaScraperAuto:
     def solve_recaptcha(self, soup):
         """Resuelve el reCAPTCHA automáticamente usando 2captcha"""
         try:
-            # Obtener site key dinámicamente
-            site_key = self.get_recaptcha_site_key(soup)
+            # Usar caché del site key si está disponible, sino extraerlo
+            if self.cached_site_key:
+                site_key = self.cached_site_key
+                print(f"🔄 Usando site key en caché: {site_key}")
+            else:
+                # Obtener site key dinámicamente
+                site_key = self.get_recaptcha_site_key(soup)
+                self.cached_site_key = site_key  # Guardar en caché
+                print(f"💾 Site key guardado en caché: {site_key}")
             
             print(f"🤖 Resolviendo reCAPTCHA automáticamente con 2captcha...")
-            print(f"Site key: {site_key}")
             print(f"URL: {self.base_url}")
             
-            # Resolver reCAPTCHA usando la librería oficial
+            # Resolver reCAPTCHA usando la librería oficial (ahora más rápido con polling de 1s)
             captcha_response = self.captcha_solver.solve_recaptcha_v2(site_key, self.base_url, invisible=False)
             
             print("✅ reCAPTCHA resuelto correctamente")
@@ -194,6 +212,90 @@ class RegistraduriaScraperAuto:
                     "status": "success",
                     "timestamp": datetime.now().isoformat(),
                     "data": muerte_data,
+                    "total_records": 1
+                }
+
+            # Detectar estado "Cancelada por Doble Cedulación" y normalizar la respuesta
+            if re.search(r"Cancelada por Doble Cedulaci[oó]n|CANCELADA POR DOBLE CEDULACI[OÓ]N", html_content, re.IGNORECASE):
+                print("⚠️ Registro cancelado por doble cedulación, devolviendo valores normalizados")
+                
+                # Intentar extraer el NUIP del HTML
+                nuip_doble = None
+                nuip_match_doble = re.search(r">(\d{6,12})<\\/td>", html_content)
+                if not nuip_match_doble:
+                    nuip_match_doble = re.search(r"(\d{6,12})", html_content)
+                if nuip_match_doble:
+                    nuip_doble = nuip_match_doble.group(1)
+
+                doble_data = [{
+                    'NUIP': nuip_doble if nuip_doble else "CANCELADA",
+                    'DEPARTAMENTO': 'NO HABILITA',
+                    'MUNICIPIO': 'NO HABILITA',
+                    'PUESTO': 'CANCELADA POR DOBLE CEDULACIÓN',
+                    'DIRECCIÓN': 'NO HABILITADA',
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": doble_data,
+                    "total_records": 1
+                }
+
+            # Detectar estado "Cancelada por Falsa Identidad" y normalizar la respuesta
+            if re.search(r"Cancelada por Falsa Identidad|CANCELADA POR FALSA IDENTIDAD", html_content, re.IGNORECASE):
+                print("⚠️ Registro cancelado por falsa identidad, devolviendo valores normalizados")
+                
+                # Intentar extraer el NUIP del HTML
+                nuip_falsa = None
+                nuip_match_falsa = re.search(r">(\d{6,12})<\\/td>", html_content)
+                if not nuip_match_falsa:
+                    nuip_match_falsa = re.search(r"(\d{6,12})", html_content)
+                if nuip_match_falsa:
+                    nuip_falsa = nuip_match_falsa.group(1)
+
+                falsa_data = [{
+                    'NUIP': nuip_falsa if nuip_falsa else "CANCELADA",
+                    'DEPARTAMENTO': 'NO HABILITA',
+                    'MUNICIPIO': 'NO HABILITA',
+                    'PUESTO': 'CANCELADA POR FALSA IDENTIDAD',
+                    'DIRECCIÓN': 'NO HABILITADA',
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": falsa_data,
+                    "total_records": 1
+                }
+
+            # Detectar estado "Vigente con Perdida o Suspension de los Derechos Politicos" y normalizar la respuesta
+            if re.search(r"Vigente con Perdida o Suspension de los Derechos Politicos|Vigente con P[ée]rdida o Suspensi[oó]n de los Derechos Pol[ií]ticos", html_content, re.IGNORECASE):
+                print("⚠️ Cédula vigente pero con pérdida o suspensión de derechos políticos, devolviendo valores normalizados")
+                
+                # Intentar extraer el NUIP del HTML
+                nuip_suspension = None
+                nuip_match_suspension = re.search(r">(\d{6,12})<\\/td>", html_content)
+                if not nuip_match_suspension:
+                    nuip_match_suspension = re.search(r"(\d{6,12})", html_content)
+                if nuip_match_suspension:
+                    nuip_suspension = nuip_match_suspension.group(1)
+
+                suspension_data = [{
+                    'NUIP': nuip_suspension if nuip_suspension else "SUSPENDIDA",
+                    'DEPARTAMENTO': 'NO HABILITA',
+                    'MUNICIPIO': 'NO HABILITA',
+                    'PUESTO': 'VIGENTE CON PÉRDIDA O SUSPENSIÓN DE DERECHOS POLÍTICOS',
+                    'DIRECCIÓN': 'NO HABILITADA',
+                    'MESA': '0'
+                }]
+
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": suspension_data,
                     "total_records": 1
                 }
 
@@ -464,12 +566,23 @@ class RegistraduriaScraperAuto:
             }
     
     def scrape_multiple_nuips(self, nuips_list, delay=5):
-        """Consulta múltiples NUIPs con delay entre consultas"""
+        """Consulta múltiples NUIPs con delay entre consultas - Optimizado con caché"""
         results = []
         total = len(nuips_list)
         
-        print(f"\n🚀 INICIANDO CONSULTA MASIVA DE {total} NUIPs")
+        print(f"\n🚀 INICIANDO CONSULTA MASIVA DE {total} NUIPs (MODO OPTIMIZADO)")
         print(f"Delay entre consultas: {delay} segundos")
+        
+        # Pre-cargar página y datos del formulario una sola vez
+        print("\n🔧 Pre-cargando datos del formulario...")
+        html_content = self.get_page_content()
+        if html_content:
+            soup = self.parse_page(html_content)
+            if soup:
+                # Esto cacheará el site_key y form_data automáticamente
+                self.get_recaptcha_site_key(soup)
+                self.extract_form_data(soup)
+                print("✅ Datos pre-cargados en caché")
         
         for i, nuip in enumerate(nuips_list, 1):
             print(f"\n📋 Procesando {i}/{total}: {nuip}")
@@ -484,6 +597,12 @@ class RegistraduriaScraperAuto:
         
         print(f"\n🎉 CONSULTA MASIVA COMPLETADA: {total} NUIPs procesados")
         return results
+    
+    def clear_cache(self):
+        """Limpia la caché de site_key y form_data"""
+        self.cached_site_key = None
+        self.cached_form_data = None
+        print("🗑️ Caché limpiada")
     
     def close(self):
         """Cierra la sesión"""
