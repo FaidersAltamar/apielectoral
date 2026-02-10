@@ -240,7 +240,7 @@ class RegistraduriaScraperAuto:
                     "timestamp": datetime.now().isoformat()
                 }
             
-            print(f"🔍 Respuesta API: {json.dumps(api_response, indent=2, ensure_ascii=False)[:500]}...")
+            print(f"🔍 Respuesta API completa: {json.dumps(api_response, indent=2, ensure_ascii=False)}")
             
             # Manejar caso específico: status_code 13 (NO CENSO)
             if (api_response.get('status') == False and 
@@ -266,12 +266,45 @@ class RegistraduriaScraperAuto:
                     "total_records": 1
                 }
             
-            # Verificar si la respuesta tiene éxito
+            # Verificar si la respuesta tiene éxito y data
             if api_response.get('status') and api_response.get('data'):
                 data = api_response.get('data', {})
+                is_in_census = data.get('is_in_census', True)
+                novelty = data.get('novelty', [])
+                voter = data.get('voter', {})
+                
+                print(f"🔍 is_in_census: {is_in_census}")
+                print(f"🔍 novelty: {novelty}")
+                
+                # Manejar caso: Cédula no habilitada (is_in_census: false con novelty)
+                if not is_in_census and novelty:
+                    print("⚠️ Cédula no habilitada en el censo")
+                    
+                    novelty_name = novelty[0].get('name', 'NO HABILITADA').upper()
+                    
+                    no_habilitada_data = [{
+                        'NUIP': str(voter.get('identification', '')),
+                        'DEPARTAMENTO': 'NO HABILITADA',
+                        'MUNICIPIO': 'NO HABILITADA',
+                        'PUESTO': novelty_name,
+                        'DIRECCIÓN': 'NO HABILITADA',
+                        'MESA': '0',
+                        'ZONA': 'NO HABILITADA'
+                    }]
+                    
+                    return {
+                        "status": "success",
+                        "timestamp": datetime.now().isoformat(),
+                        "data": no_habilitada_data,
+                        "total_records": 1
+                    }
+                
+                # Caso normal: Cédula habilitada con puesto de votación
                 polling_place = data.get('polling_place', {})
                 place_address = polling_place.get('place_address', {})
-                voter = data.get('voter', {})
+                
+                print(f"🔍 polling_place keys: {list(polling_place.keys()) if polling_place else 'None'}")
+                print(f"🔍 place_address keys: {list(place_address.keys()) if place_address else 'None'}")
                 
                 # Extraer campos del JSON según la estructura real
                 filtered_data = [{
@@ -292,7 +325,7 @@ class RegistraduriaScraperAuto:
                 }
                 
                 print(f"✅ Datos extraídos exitosamente")
-                print(f"📋 Registro: {filtered_data[0]}")
+                print(f"📋 Registro completo: {json.dumps(filtered_data[0], indent=2, ensure_ascii=False)}")
                 return result
             else:
                 # Manejar errores de la API

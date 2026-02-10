@@ -329,11 +329,40 @@ class RegistraduriaScraperAuto:
                     "nuip": "NO CENSO"
                 }
             
+            # Verificar si la respuesta tiene éxito y data
             if api_response.get('status') and api_response.get('data'):
                 data = api_response.get('data', {})
+                is_in_census = data.get('is_in_census', True)
+                novelty = data.get('novelty', [])
+                voter = data.get('voter', {})
+                
+                # Manejar caso: Cédula no habilitada (is_in_census: false con novelty)
+                if not is_in_census and novelty:
+                    print("⚠️ Cédula no habilitada en el censo")
+                    
+                    novelty_name = novelty[0].get('name', 'NO HABILITADA').upper()
+                    
+                    no_habilitada_data = [{
+                        'NUIP': str(voter.get('identification', '')),
+                        'DEPARTAMENTO': 'NO HABILITADA',
+                        'MUNICIPIO': 'NO HABILITADA',
+                        'PUESTO': novelty_name,
+                        'DIRECCIÓN': 'NO HABILITADA',
+                        'MESA': '0',
+                        'ZONA': 'NO HABILITADA'
+                    }]
+                    
+                    return {
+                        "status": "success",
+                        "timestamp": datetime.now().isoformat(),
+                        "data": no_habilitada_data,
+                        "total_records": 1,
+                        "nuip": str(voter.get('identification', ''))
+                    }
+                
+                # Caso normal: Cédula habilitada con puesto de votación
                 polling_place = data.get('polling_place', {})
                 place_address = polling_place.get('place_address', {})
-                voter = data.get('voter', {})
                 
                 filtered_data = [{
                     'NUIP': str(voter.get('identification', '')),
