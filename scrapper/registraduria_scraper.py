@@ -242,6 +242,30 @@ class RegistraduriaScraperAuto:
             
             print(f"🔍 Respuesta API: {json.dumps(api_response, indent=2, ensure_ascii=False)[:500]}...")
             
+            # Manejar caso específico: status_code 13 (NO CENSO)
+            if (api_response.get('status') == False and 
+                api_response.get('status_code') == 13 and 
+                not api_response.get('data')):
+                
+                print("⚠️ Cédula no encontrada en el censo (status_code: 13)")
+                
+                no_censo_data = [{
+                    'NUIP': 'NO CENSO',
+                    'DEPARTAMENTO': 'NO CENSO',
+                    'MUNICIPIO': 'NO CENSO',
+                    'PUESTO': 'NO CENSO',
+                    'DIRECCIÓN': 'NO CENSO',
+                    'MESA': '0',
+                    'ZONA': 'NO CENSO'
+                }]
+                
+                return {
+                    "status": "success",
+                    "timestamp": datetime.now().isoformat(),
+                    "data": no_censo_data,
+                    "total_records": 1
+                }
+            
             # Verificar si la respuesta tiene éxito
             if api_response.get('status') and api_response.get('data'):
                 data = api_response.get('data', {})
