@@ -33,7 +33,7 @@ class TokenCache:
     def __init__(self):
         if self._initialized:
             return
-        self._token_pool = deque(maxlen=5)
+        self._token_pool = deque(maxlen=10)  # Aumentado de 5 a 10 tokens
         self._pool_lock = Lock()
         self._background_thread = None
         self._keep_filling = False
@@ -51,6 +51,33 @@ class TokenCache:
             self._background_thread.start()
             print("🚀 [TokenCache] Pool de tokens iniciado en background")
     
+    def warmup_pool(self, api_key, sitekey, page_url, num_tokens=2):
+        """Pre-llena el pool con tokens al inicio para tener disponibles rápidamente"""
+        def resolve_token():
+            try:
+                solver = TwoCaptchaSolver(api_key)
+                print("🔥 [Warmup] Resolviendo token inicial...")
+                token = solver.solve_recaptcha_v2(site_key=sitekey, page_url=page_url, invisible=False)
+                if token:
+                    with self._pool_lock:
+                        self._token_pool.append({
+                            'token': token,
+                            'timestamp': time.time()
+                        })
+                    print(f"✅ [Warmup] Token agregado (total: {len(self._token_pool)})")
+            except Exception as e:
+                print(f"❌ [Warmup] Error: {e}")
+        
+        # Iniciar threads paralelos para resolver tokens
+        threads = []
+        for i in range(num_tokens):
+            t = Thread(target=resolve_token, daemon=True)
+            t.start()
+            threads.append(t)
+        
+        print(f"🔥 [Warmup] Iniciando pre-llenado de {num_tokens} tokens en paralelo...")
+        return threads
+    
     def _fill_pool(self, api_key, sitekey, page_url):
         """Mantiene el pool lleno de tokens válidos"""
         solver = TwoCaptchaSolver(api_key)
@@ -58,7 +85,7 @@ class TokenCache:
             with self._pool_lock:
                 pool_size = len(self._token_pool)
             
-            if pool_size < 3:  # Mantener al menos 3 tokens
+            if pool_size < 6:  # Mantener al menos 6 tokens (aumentado de 3)
                 try:
                     print("🔄 [TokenCache] Resolviendo token...")
                     token = solver.solve_recaptcha_v2(site_key=sitekey, page_url=page_url, invisible=False)
@@ -72,7 +99,7 @@ class TokenCache:
                 except Exception as e:
                     print(f"❌ [TokenCache] Error: {e}")
             
-            time.sleep(3)  # Verificar cada 3 segundos
+            time.sleep(1)  # Verificar cada 1 segundo (más agresivo)
     
     def get_token(self, max_age=90):
         """Obtiene un token válido del pool"""
@@ -126,7 +153,13 @@ class RegistraduriaScraperAuto:
             self.token_cache = TokenCache()
             pool_size = self.token_cache.get_pool_size()
             if pool_size == 0:
+                # Iniciar background filler
                 self.token_cache.start_filler(self.api_key, self.cached_site_key, self.base_url)
+                # Iniciar warmup en paralelo para pre-llenar el pool
+                print("🔥 Iniciando pre-llenado del pool...")
+                self.token_cache.warmup_pool(self.api_key, self.cached_site_key, self.base_url, num_tokens=3)
+            else:
+                print(f"♻️  Pool de tokens ya activo ({pool_size} tokens disponibles)")
         
         # Verificar balance solo si se solicita
         if check_balance:
@@ -149,6 +182,25 @@ class RegistraduriaScraperAuto:
         
         return is_valid
     
+    def wait_for_pool_ready(self, timeout=40):
+        """Espera a que el pool tenga al menos 1 token disponible"""
+        if not self.enable_token_pool:
+            return True
+        
+        print("⏳ Esperando a que el pool tenga tokens disponibles...")
+        start = time.time()
+        
+        while time.time() - start < timeout:
+            pool_size = self.token_cache.get_pool_size()
+            if pool_size > 0:
+                elapsed = time.time() - start
+                print(f"✅ Pool listo con {pool_size} token(es) disponibles (esperó {elapsed:.1f}s)")
+                return True
+            time.sleep(0.5)
+        
+        print(f"⚠️  Timeout esperando pool, continuando de todos modos...")
+        return False
+    
     def solve_recaptcha(self):
         """Resuelve reCAPTCHA usando sistema de caché optimizado"""
         try:
@@ -158,6 +210,10 @@ class RegistraduriaScraperAuto:
             
             # 2. Intentar obtener del pool
             if self.enable_token_pool:
+                # Si el pool está vacío y nunca hemos resuelto un token, esperar un poco
+                if self.token_cache.get_pool_size() == 0 and not self.cached_token:
+                    self.wait_for_pool_ready(timeout=40)
+                
                 pool_token = self.token_cache.get_token(self.token_ttl)
                 if pool_token:
                     self.cached_token = pool_token
