@@ -1,5 +1,7 @@
 # Import the official 2captcha library
 from twocaptcha import TwoCaptcha
+from twocaptcha.api import ApiException
+from urllib.parse import urlparse
 
 
 class TwoCaptchaSolver:
@@ -80,18 +82,49 @@ class TwoCaptchaSolver:
         print(f"🔍 Debugging - Invisible: {invisible}")
         
         try:
-            # Resolver reCAPTCHA usando la librería oficial con configuración ultra optimizada
+            # Intento principal: usar la URL proporcionada
+            print("🔁 Intentando resolver usando la URL completa dada al scraper...")
             result = self.solver.recaptcha(
                 sitekey=site_key,
                 url=page_url,
                 invisible=1 if invisible else 0,
-                pollingInterval=1  # Polling cada 1 segundo para máxima velocidad
+                pollingInterval=1
             )
-            
             print("✅ reCAPTCHA resuelto exitosamente!")
             print(f"🔍 Token recibido (primeros 50 chars): {result['code'][:50]}...")
             return result['code']
-        
+
+        except ApiException as api_e:
+            # Manejar errores específicos de la API de 2captcha
+            msg = str(api_e)
+            print(f"🔍 Debugging - Error completo: {msg}")
+            print(f"🔍 Debugging - Tipo de error: {type(api_e)}")
+
+            # ERROR_WRONG_GOOGLEKEY suele indicar que el sitekey no corresponde al dominio pasado.
+            if 'ERROR_WRONG_GOOGLEKEY' in msg:
+                try:
+                    parsed = urlparse(page_url)
+                    origin = f"{parsed.scheme}://{parsed.netloc}"
+                    if origin != page_url:
+                        print(f"⚠️ ERROR_WRONG_GOOGLEKEY detectado, reintentando con el origen: {origin}")
+                        try:
+                            result = self.solver.recaptcha(
+                                sitekey=site_key,
+                                url=origin,
+                                invisible=1 if invisible else 0,
+                                pollingInterval=1
+                            )
+                            print("✅ reCAPTCHA resuelto usando el origen!")
+                            print(f"🔍 Token recibido (primeros 50 chars): {result['code'][:50]}...")
+                            return result['code']
+                        except Exception as e2:
+                            print(f"❌ Reintento con origen falló: {e2}")
+                except Exception as eparse:
+                    print(f"⚠️ Error al parsear URL para reintento: {eparse}")
+
+            # Si no se pudo resolver con un manejo específico, elevar el error
+            raise Exception(f"Error al resolver reCAPTCHA: {api_e}")
+
         except Exception as e:
             print(f"🔍 Debugging - Error completo: {str(e)}")
             print(f"🔍 Debugging - Tipo de error: {type(e)}")

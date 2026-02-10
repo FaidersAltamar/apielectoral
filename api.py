@@ -29,7 +29,7 @@ from task_manager import (
 
 # Importar clases existentes
 from config import settings
-from scrapper.registraduria_scraper import RegistraduriaScraperAuto, save_registraduria_results
+from scrapper.registraduria_scraper_optimizado import RegistraduriaScraperAuto, save_registraduria_results
 from scrapper.police_scraper import PoliciaScraperAuto, save_police_results 
 from scrapper.procuraduria_scraper import ProcuraduriaScraperAuto, save_procuraduria_results
 from scrapper.sisben_scraper import SisbenScraperAuto, save_sisben_results
@@ -291,7 +291,8 @@ async def get_registraduria_data(request: PeticionRequest):
     start_time = time.time() 
     
     try:
-        scraper = RegistraduriaScraperAuto(API_KEY)
+        # Crear scraper sin verificar balance (más rápido)
+        scraper = RegistraduriaScraperAuto(API_KEY, check_balance=False)
         
         try:
             result = scraper.scrape_nuip(request.nuip)

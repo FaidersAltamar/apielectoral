@@ -6,8 +6,6 @@ import sys
 import re
 from bs4 import BeautifulSoup
 from datetime import datetime
-from threading import Thread, Lock
-from collections import deque
 
 # Cargar variables de entorno desde .env
 from dotenv import load_dotenv
@@ -18,41 +16,22 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.captcha_solver import TwoCaptchaSolver
 
 class RegistraduriaScraperAuto:
-    # Pool compartido de tokens entre todas las instancias
-    _token_pool = deque(maxlen=5)  # Máximo 5 tokens en pool
-    _pool_lock = Lock()
-    _background_thread = None
-    _keep_filling = False
-    
-    def __init__(self, captcha_api_key, check_balance=True, token_ttl=90, enable_token_pool=True):
+    def __init__(self, captcha_api_key, check_balance=True):
         self.captcha_solver = TwoCaptchaSolver(captcha_api_key)
         self.session = requests.Session()
-        self.base_url = "https://eleccionescolombia.registraduria.gov.co/identificacion"
-        self.api_url = "https://apiweb-eleccionescolombia.infovotantes.com/api/v1/citizen/get-information"
-        self.cached_site_key = "6Lc9DmgrAAAAAJAjWVhjDy1KSgqzqJikY5z7I9SV"  # Sitekey conocido
+        self.base_url = "https://wsp.registraduria.gov.co/censo/consultar/"
+        self.cached_site_key = None  # Caché del site key para evitar extraerlo cada vez
         self.cached_form_data = None  # Caché de datos del formulario
-        
-        # Sistema de caché de tokens
-        self.cached_token = None
-        self.token_timestamp = None
-        self.token_ttl = token_ttl  # Tiempo de vida del token en segundos (default 90s)
-        self.enable_token_pool = enable_token_pool
-        self.api_key = captcha_api_key
         
         # Configurar headers para simular un navegador real
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-            'Accept': 'application/json, text/plain, */*',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
             'Accept-Language': 'es-ES,es;q=0.9,en;q=0.8',
             'Accept-Encoding': 'gzip, deflate, br',
             'Connection': 'keep-alive',
-            'Origin': 'https://eleccionescolombia.registraduria.gov.co',
-            'Referer': 'https://eleccionescolombia.registraduria.gov.co/'
+            'Upgrade-Insecure-Requests': '1'
         })
-        
-        # Iniciar pool de tokens en background si está habilitado
-        if self.enable_token_pool and not RegistraduriaScraperAuto._background_thread:
-            self._start_token_pool_filler()
         
         # Verificar balance solo si se solicita (para ahorrar tiempo)
         if check_balance:
@@ -113,29 +92,15 @@ class RegistraduriaScraperAuto:
     def get_recaptcha_site_key(self, soup):
         """Extrae dinámicamente el site key del reCAPTCHA desde el HTML"""
         try:
-            # Buscar cualquier elemento que tenga el atributo data-sitekey
-            tag_with_sitekey = soup.find(attrs={"data-sitekey": True})
-            if tag_with_sitekey:
-                site_key = tag_with_sitekey.get('data-sitekey')
+            # Buscar el site key en el elemento div del reCAPTCHA
+            recaptcha_element = soup.find('div', class_='g-recaptcha')
+            
+            if recaptcha_element:
+                site_key = recaptcha_element.get('data-sitekey')
                 if site_key:
                     print(f"🔍 Site key encontrado dinámicamente: {site_key}")
                     return site_key
-
-            # Buscar en iframes (src con k=sitekey) y en scripts por patrones comunes
-            iframes = ''.join([ifr.get('src') or '' for ifr in soup.find_all('iframe')])
-            scripts = ''.join([s.get('src') or s.text or '' for s in soup.find_all('script')])
-            combined = iframes + scripts
-            # Patrón común: k=SITEKEY en src de iframe de recaptcha
-            m_iframe = re.search(r"[?&]k=([A-Za-z0-9_-]{20,100})", iframes)
-            if m_iframe:
-                print(f"🔍 Site key encontrado en iframe src: {m_iframe.group(1)}")
-                return m_iframe.group(1)
-
-            m = re.search(r"sitekey\s*[:=]\s*['\"]([A-Za-z0-9_-]{20,100})['\"]", combined)
-            if m:
-                print(f"🔍 Site key encontrado en scripts: {m.group(1)}")
-                return m.group(1)
-
+            
             print("⚠️ No se pudo extraer el site key dinámicamente, usando el hardcodeado")
             return "6LcthjAgAAAAFIQLxy52074zanHv47cIvmIHglH"
         
@@ -143,12 +108,18 @@ class RegistraduriaScraperAuto:
             print(f"⚠️ Error al extraer site key: {e}, usando hardcodeado")
             return "6LcthjAgAAAAFIQLxy52074zanHv47cIvmIHglH"
     
-    def solve_recaptcha(self):
+    def solve_recaptcha(self, soup):
         """Resuelve el reCAPTCHA automáticamente usando 2captcha"""
         try:
-            # Usar el site key conocido
-            site_key = self.cached_site_key
-            print(f"🔄 Usando site key conocido: {site_key}")
+            # Usar caché del site key si está disponible, sino extraerlo
+            if self.cached_site_key:
+                site_key = self.cached_site_key
+                print(f"🔄 Usando site key en caché: {site_key}")
+            else:
+                # Obtener site key dinámicamente
+                site_key = self.get_recaptcha_site_key(soup)
+                self.cached_site_key = site_key  # Guardar en caché
+                print(f"💾 Site key guardado en caché: {site_key}")
             
             print(f"🤖 Resolviendo reCAPTCHA automáticamente con 2captcha...")
             print(f"URL: {self.base_url}")
@@ -165,131 +136,56 @@ class RegistraduriaScraperAuto:
             print(f"🔍 Traceback completo: {traceback.format_exc()}")
             return None
     
-    def submit_form(self, nuip, captcha_response):
-        """Envía el formulario a la API usando POST request"""
+    def submit_form(self, nuip, captcha_response, form_data):
+        """Envía el formulario con POST request"""
         try:
-            print("📤 Enviando consulta a la API...")
+            print("📤 Enviando formulario...")
             
-            # Preparar datos del formulario para la API
-            post_data = {
-                "identification": str(nuip),
-                "identification_type": "CC",
-                "election_code": "congreso",
-                "module": "polling_place",
-                "platform": "web"
-            }
-            
-            # Actualizar headers para el POST JSON con el token como Bearer
-            headers = self.session.headers.copy()
-            headers.update({
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {captcha_response}',  # Token como Bearer
-                'Sec-Ch-Ua': '"Chromium";v="120", "Not_A Brand";v="99"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'cross-site',
-                'Priority': 'u=1, i'
+            # Preparar datos del formulario
+            post_data = form_data.copy()
+            post_data.update({
+                'nuip': str(nuip),
+                'tipo': '-1',  # Puesto de votación actual
+                'g-recaptcha-response': captcha_response
             })
             
-            print(f"🔍 Enviando a: {self.api_url}")
-            print(f"🔍 Body: {json.dumps(post_data, ensure_ascii=False)}")
+            # Actualizar headers para el POST
+            headers = self.session.headers.copy()
+            headers.update({
+                'Content-Type': 'application/x-www-form-urlencoded',
+                'Origin': 'https://wsp.registraduria.gov.co',
+                'Referer': self.base_url
+            })
             
-            # Enviar formulario a la API
+            # Enviar formulario
             response = self.session.post(
-                self.api_url,
-                json=post_data,
+                self.base_url,
+                data=post_data,
                 headers=headers,
-                timeout=10  # Reducido de 15 a 10 segundos
+                timeout=15
             )
-            
-            print(f"🔍 Status Code: {response.status_code}")
             
             response.raise_for_status()
             
-            json_response = response.json()
-            print(f"✅ API respondió correctamente")
-            print(f"🔍 Respuesta: {json.dumps(json_response, indent=2, ensure_ascii=False)[:300]}...")
-            
-            return json_response
+            print("✅ Formulario enviado correctamente")
+            return response.text
         
         except requests.RequestException as e:
             print(f"❌ Error al enviar formulario: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                try:
-                    error_json = e.response.json()
-                    print(f"🔍 Respuesta de error: {json.dumps(error_json, indent=2, ensure_ascii=False)}")
-                    return error_json
-                except:
-                    print(f"🔍 Respuesta texto: {e.response.text[:500]}")
             return None
         except Exception as e:
             print(f"❌ Error general al enviar formulario: {e}")
             return None
     
-    def extract_data(self, api_response):
-        """Extrae los datos de la respuesta JSON de la API"""
+    def extract_data(self, html_content):
+        """Extrae los datos de la tabla de resultados del HTML"""
         try:
-            print("📊 Procesando respuesta de la API...")
-            
-            if not api_response:
-                return {
-                    "status": "error",
-                    "message": "Respuesta vacía de la API",
-                    "timestamp": datetime.now().isoformat()
-                }
-            
-            print(f"🔍 Respuesta API: {json.dumps(api_response, indent=2, ensure_ascii=False)[:500]}...")
-            
-            # Verificar si la respuesta tiene éxito
-            if api_response.get('status') and api_response.get('data'):
-                data = api_response.get('data', {})
-                polling_place = data.get('polling_place', {})
-                place_address = polling_place.get('place_address', {})
-                voter = data.get('voter', {})
-                
-                # Extraer campos del JSON según la estructura real
-                filtered_data = [{
-                    'NUIP': str(voter.get('identification', '')),
-                    'DEPARTAMENTO': place_address.get('state', ''),
-                    'MUNICIPIO': place_address.get('town', ''),
-                    'PUESTO': polling_place.get('stand', ''),
-                    'DIRECCIÓN': place_address.get('address', ''),
-                    'MESA': str(polling_place.get('table', '')),
-                    'ZONA': str(place_address.get('zone', ''))
-                }]
-                
-                result = {
-                    "status": "success",
-                    "timestamp": datetime.now().isoformat(),
-                    "data": filtered_data,
-                    "total_records": 1
-                }
-                
-                print(f"✅ Datos extraídos exitosamente")
-                print(f"📋 Registro: {filtered_data[0]}")
-                return result
-            else:
-                # Manejar errores de la API
-                error_msg = api_response.get('message', api_response.get('error', 'Error desconocido'))
-                print(f"⚠️ La API devolvió un error: {error_msg}")
-                
-                return {
-                    "status": "error",
-                    "message": error_msg,
-                    "timestamp": datetime.now().isoformat()
-                }
-        
-        except Exception as e:
-            print(f"❌ Error al extraer datos: {e}")
-            import traceback
-            print(f"🔍 Traceback completo: {traceback.format_exc()}")
-            return {
-                "status": "error", 
-                "message": str(e),
-                "timestamp": datetime.now().isoformat()
-            }
+            print("📊 Extrayendo datos de la tabla...")
+            print(f"🔍 Longitud del contenido: {len(html_content)} caracteres")
+            print(f"🔍 Primeros 1000 caracteres del contenido:")
+            print(html_content[:1000])
+            print(f"🔍 Últimos 500 caracteres del contenido:")
+            print(html_content[-500:])
 
             # Detectar estado "Cancelada por Muerte" y normalizar la respuesta
             if re.search(r"Cancelada por Muerte|CANCELADA POR MUERTE", html_content, re.IGNORECASE):
@@ -563,69 +459,6 @@ class RegistraduriaScraperAuto:
                 except Exception as e:
                     print(f"⚠️ Error en método BeautifulSoup: {e}")
             
-            # Si el HTML coincide con el nuevo diseño (contenedor shadow-custom-card), parsearlo con BeautifulSoup
-            try:
-                soup_new = BeautifulSoup(html_content, 'html.parser')
-                container = soup_new.find('div', class_=lambda c: c and 'shadow-custom-card' in c)
-                if container:
-                    print("🔎 Contenedor moderno 'shadow-custom-card' detectado, extrayendo campos...")
-
-                    # Documento
-                    h2_doc = container.find('h2', string=re.compile(r'Documento de identidad', re.I))
-                    if h2_doc:
-                        nuip_span = h2_doc.find_next_sibling('span')
-                        if nuip_span:
-                            nuip_text = nuip_span.get_text(strip=True)
-                            m = re.search(r"(\d{6,12})", nuip_text)
-                            if m:
-                                nuip = m.group(1)
-
-                    # Función auxiliar para obtener valor tras un label
-                    def get_value_by_label(lbl):
-                        lbl_span = container.find('span', string=re.compile(rf'^{re.escape(lbl)}$', re.I))
-                        if lbl_span:
-                            val_span = lbl_span.find_next_sibling('span')
-                            if val_span:
-                                return val_span.get_text(strip=True)
-                        return None
-
-                    puesto = get_value_by_label('Puesto')
-                    mesa = get_value_by_label('Mesa')
-                    # 'Zona' puede estar presente, lo guardamos también
-                    zona = get_value_by_label('Zona')
-                    departamento = get_value_by_label('Departamento')
-                    municipio = get_value_by_label('Municipio')
-                    direccion = get_value_by_label('Dirección')
-
-                    # Si la mesa no viene como número dentro de un <b>, intentar extraer dígitos
-                    if mesa:
-                        mm = re.search(r"(\d+)", mesa)
-                        if mm:
-                            mesa = mm.group(1)
-
-                    # Si puesto contiene la zona concatenada (ej. '28 - DON ALONSO'), dejar tal cual
-                    if (nuip or departamento) and (puesto or municipio):
-                        filtered_data = [{
-                            'NUIP': nuip if nuip else '',
-                            'DEPARTAMENTO': departamento if departamento else '',
-                            'MUNICIPIO': municipio if municipio else '',
-                            'PUESTO': puesto if puesto else (zona if zona else ''),
-                            'DIRECCIÓN': direccion if direccion else '',
-                            'MESA': mesa if mesa else ''
-                        }]
-
-                        result = {
-                            "status": "success",
-                            "timestamp": datetime.now().isoformat(),
-                            "data": filtered_data,
-                            "total_records": 1
-                        }
-                        print(f"✅ Datos extraídos del contenedor moderno: {filtered_data[0]}")
-                        return result
-            except Exception:
-                # Si falla el parseo del nuevo diseño, continuar con la extracción previa
-                pass
-
             # Construir resultado
             if nuip and departamento:
                 # Aplicar limpieza final a todos los campos para garantizar que estén limpios
@@ -673,8 +506,31 @@ class RegistraduriaScraperAuto:
         print(f"{'='*50}")
         
         try:
-            # 1. Resolver reCAPTCHA
-            captcha_response = self.solve_recaptcha()
+            # 1. Obtener página
+            html_content = self.get_page_content()
+            if not html_content:
+                return {
+                    "status": "error", 
+                    "message": "Error al obtener la página", 
+                    "nuip": nuip,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # 2. Parsear página
+            soup = self.parse_page(html_content)
+            if not soup:
+                return {
+                    "status": "error", 
+                    "message": "Error al parsear la página", 
+                    "nuip": nuip,
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            # 3. Extraer datos del formulario
+            form_data = self.extract_form_data(soup)
+            
+            # 4. Resolver reCAPTCHA
+            captcha_response = self.solve_recaptcha(soup)
             if not captcha_response:
                 return {
                     "status": "error", 
@@ -683,18 +539,18 @@ class RegistraduriaScraperAuto:
                     "timestamp": datetime.now().isoformat()
                 }
             
-            # 2. Enviar consulta a la API
-            api_response = self.submit_form(nuip, captcha_response)
-            if not api_response:
+            # 5. Enviar formulario
+            response_html = self.submit_form(nuip, captcha_response, form_data)
+            if not response_html:
                 return {
                     "status": "error", 
-                    "message": "Error al consultar la API", 
+                    "message": "Error al enviar formulario", 
                     "nuip": nuip,
                     "timestamp": datetime.now().isoformat()
                 }
             
-            # 3. Extraer datos de la respuesta JSON
-            result = self.extract_data(api_response)
+            # 6. Extraer datos
+            result = self.extract_data(response_html)
             result["nuip"] = nuip
             
             print(f"✅ CONSULTA COMPLETADA PARA NUIP: {nuip}")
@@ -710,12 +566,23 @@ class RegistraduriaScraperAuto:
             }
     
     def scrape_multiple_nuips(self, nuips_list, delay=5):
-        """Consulta múltiples NUIPs con delay entre consultas"""
+        """Consulta múltiples NUIPs con delay entre consultas - Optimizado con caché"""
         results = []
         total = len(nuips_list)
         
-        print(f"\n🚀 INICIANDO CONSULTA MASIVA DE {total} NUIPs")
+        print(f"\n🚀 INICIANDO CONSULTA MASIVA DE {total} NUIPs (MODO OPTIMIZADO)")
         print(f"Delay entre consultas: {delay} segundos")
+        
+        # Pre-cargar página y datos del formulario una sola vez
+        print("\n🔧 Pre-cargando datos del formulario...")
+        html_content = self.get_page_content()
+        if html_content:
+            soup = self.parse_page(html_content)
+            if soup:
+                # Esto cacheará el site_key y form_data automáticamente
+                self.get_recaptcha_site_key(soup)
+                self.extract_form_data(soup)
+                print("✅ Datos pre-cargados en caché")
         
         for i, nuip in enumerate(nuips_list, 1):
             print(f"\n📋 Procesando {i}/{total}: {nuip}")
@@ -732,7 +599,8 @@ class RegistraduriaScraperAuto:
         return results
     
     def clear_cache(self):
-        """Limpia la caché"""
+        """Limpia la caché de site_key y form_data"""
+        self.cached_site_key = None
         self.cached_form_data = None
         print("🗑️ Caché limpiada")
     
