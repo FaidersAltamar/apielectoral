@@ -116,6 +116,7 @@ def main():
     if hasattr(signal, 'SIGHUP'):
         signal.signal(signal.SIGHUP, lambda s, f: None)  # Ignorar SIGHUP para no terminar por desconexión
 
+    ciclos_idle = 0
     while running:
         try:
             _limpiar_cache_fallidas()
@@ -180,8 +181,12 @@ def main():
                 time.sleep(5)
 
             if not consultas:
-                logger.info("Sin consultas. Esperando 30s...")
+                ciclos_idle += 1
+                if ciclos_idle == 1 or ciclos_idle % 10 == 0:
+                    logger.info("Escuchando... sin consultas pendientes (reintento cada 30s)")
                 time.sleep(30)
+            else:
+                ciclos_idle = 0
 
         except KeyboardInterrupt:
             break
