@@ -27,23 +27,32 @@ Si la cédula no está en censo: todos los campos se envían como `NO CENSO` con
 
 ## Despliegue en Easypanel
 
-### Configuración
+### Opción 1: App Service (recomendado)
 
-Crear un único servicio App:
+1. **Crear App** → Source: GitHub / Git → conectar repositorio
+2. Easypanel detecta el `Dockerfile` y construye la imagen
+3. En **Environment**, añadir las variables (ningún archivo `.env` en el contenedor):
 
-- **Source**: Repositorio Git
-- **Build**: Dockerfile
-- **Start command**: `python worker_registraduria.py` (por defecto en el Dockerfile)
+| Variable | Requerida | Descripción |
+|---------|-----------|-------------|
+| `TWOCAPTCHA_API_KEY` | ✅ | API key de 2Captcha |
+| `CONSULTA_API_TOKEN` | ✅ | Token Bearer para Edge Functions de Supabase |
+| `SUPABASE_FUNCTIONS_URL` | ❌ | URL base (default: `.../functions/v1`) |
+| `ELECTION_CODES` | ❌ | `congreso` (default) o `congreso,presidencial,alcaldes` |
+| `ENABLE_SCRAPER_FALLBACK` | ❌ | `true` o `false` (default: `true`) |
 
-### Variables de entorno
+4. **Deploy settings** → Replicas: 1 (o más para varios workers en paralelo)
+5. No configurar Dominio/Proxy ni puertos (es un worker, no una web)
 
-| Variable | Descripción |
-|----------|-------------|
-| `TWOCAPTCHA_API_KEY` | API key de 2Captcha para resolver reCAPTCHA |
-| `CONSULTA_API_TOKEN` | Token Bearer para autenticarse con las Edge Functions de Supabase |
-| `SUPABASE_FUNCTIONS_URL` | URL base de Edge Functions (ej: `https://xxx.supabase.co/functions/v1`) |
-| `ELECTION_CODES` | Códigos de elección a probar, separados por coma (default: `congreso`) |
-| `ENABLE_SCRAPER_FALLBACK` | `true` o `false` – usar scraper cuando API devuelve not_found sin no_censo |
+### Opción 2: Compose Service
+
+Usar el `docker-compose.yml` del proyecto. Configurar las variables en Environment de Easypanel.
+
+### Notas
+
+- El worker no expone puertos; se ejecuta en background
+- Logs visibles en la pestaña **Logs** de Easypanel
+- Si faltan credenciales, el worker sale con `exit 1` al iniciar
 
 ---
 

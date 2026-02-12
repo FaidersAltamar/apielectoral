@@ -1,0 +1,15 @@
+# Para Easypanel: Compose Service o despliegue local
+# Variables: configurar en Easypanel (Environment) o crear .env local y usar: docker-compose --env-file .env up
+
+services:
+  worker-registraduria:
+    build: .
+    container_name: worker-registraduria
+    restart: unless-stopped
+    environment:
+      - TWOCAPTCHA_API_KEY=${TWOCAPTCHA_API_KEY}
+      - CONSULTA_API_TOKEN=${CONSULTA_API_TOKEN}
+      - SUPABASE_FUNCTIONS_URL=${SUPABASE_FUNCTIONS_URL:-https://lsdnopjulddzkkboarsp.supabase.co/functions/v1}
+      - ELECTION_CODES=${ELECTION_CODES:-congreso}
+      - ENABLE_SCRAPER_FALLBACK=${ENABLE_SCRAPER_FALLBACK:-true}
+    # Worker sin puertos; Easypanel no requiere proxy para workers

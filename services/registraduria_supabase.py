@@ -141,7 +141,7 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
     # Fallback: requests directo
     try:
         session = _get_session()
-        resp = session.post('http://2captcha.com/in.php', data={
+        resp = session.post('https://2captcha.com/in.php', data={
             'key': TWOCAPTCHA_API_KEY, 'method': 'userrecaptcha',
             'googlekey': site_key, 'pageurl': page_url, 'json': 1
         }, timeout=10)
@@ -153,7 +153,7 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
         captcha_id = r.get('request')
         for attempt in range(50):
             time.sleep(1.5 if attempt < 10 else 2)
-            resp = session.get('http://2captcha.com/res.php', params={
+            resp = session.get('https://2captcha.com/res.php', params={
                 'key': TWOCAPTCHA_API_KEY, 'action': 'get', 'id': captcha_id, 'json': 1
             }, timeout=10)
             r = resp.json()

@@ -18,7 +18,7 @@ import time
 import random
 import signal
 import logging
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import ThreadPoolExecutor, as_completed, CancelledError
 
 # Cargar .env
 try:
@@ -67,14 +67,17 @@ def _warmup_token_pool(num_tokens: int = 2) -> None:
 
 def _limpiar_cache_fallidas() -> None:
     now = time.time()
-    expiradas = [c for c, ts in FAILED_CEDULAS_CACHE.items() if now - ts >= FAILED_CACHE_TTL]
+    # Copia para evitar RuntimeError si otro thread modifica durante iteración
+    expiradas = [c for c, ts in list(FAILED_CEDULAS_CACHE.items()) if now - ts >= FAILED_CACHE_TTL]
     for c in expiradas:
-        del FAILED_CEDULAS_CACHE[c]
+        FAILED_CEDULAS_CACHE.pop(c, None)
 
 
 def procesar_consulta(consulta: dict) -> tuple:
     time.sleep(random.uniform(0, 0.5))
-    cedula = consulta['cedula']
+    cedula = consulta.get('cedula') or consulta.get('numero_documento', '')
+    if not cedula:
+        return (consulta, {"status": "api_error", "error": "Cedula no especificada"})
     resultado = query_registraduria(cedula)
     # Solo scraper si not_found SIN no_censo (scraper usa misma API, no aporta si ya sabemos no_censo)
     if resultado and resultado.get('status') == 'not_found' and not resultado.get('no_censo') and settings.ENABLE_SCRAPER_FALLBACK:
@@ -96,7 +99,10 @@ def main():
 
     logger.info("Worker Registraduria (Supabase) iniciado")
     logger.info(f"Supabase: {SUPABASE_FUNCTIONS_URL}/consultas-pendientes")
-    _warmup_token_pool(num_tokens=1)
+    try:
+        _warmup_token_pool(num_tokens=1)
+    except BaseException as e:
+        logger.warning(f"Warmup falló (continuando): {e}")
     running = True
 
     def stop(sig, frame):
@@ -105,7 +111,10 @@ def main():
         logger.info("Deteniendo...")
 
     signal.signal(signal.SIGINT, stop)
-    signal.signal(signal.SIGTERM, stop)
+    if hasattr(signal, 'SIGTERM'):
+        signal.signal(signal.SIGTERM, stop)
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, lambda s, f: None)  # Ignorar SIGHUP para no terminar por desconexión
 
     while running:
         try:
@@ -117,10 +126,20 @@ def main():
                     futures = {executor.submit(procesar_consulta, c): c for c in consultas}
                     for future in as_completed(futures):
                         if not running:
-                            executor.shutdown(wait=False, cancel_futures=True)
+                            try:
+                                executor.shutdown(wait=False, cancel_futures=True)
+                            except TypeError:
+                                executor.shutdown(wait=False)
                             break
                         try:
                             consulta, resultado = future.result()
+                        except CancelledError:
+                            logger.debug("Consulta cancelada")
+                            continue
+                        except Exception as e:
+                            logger.error(f"Error procesando consulta: {e}", exc_info=True)
+                            continue
+                        try:
                             cola_id = consulta.get('id') or consulta.get('cola_id')
                             cedula = consulta.get('cedula') or consulta.get('numero_documento', '')
                             elector_id = consulta.get('elector_id') or consulta.get('electorId')
@@ -157,7 +176,7 @@ def main():
                                 ok = _send(False, err='No se encontraron datos')
                                 logger.info(f"Enviado (sin datos) cedula={cedula} cola_id={cola_id} ok={ok} resultado={resultado}")
                         except Exception as e:
-                            logger.error(f"Error procesando consulta: {e}", exc_info=True)
+                            logger.error(f"Error enviando resultado: {e}", exc_info=True)
                 time.sleep(5)
 
             if not consultas:
@@ -166,8 +185,11 @@ def main():
 
         except KeyboardInterrupt:
             break
-        except Exception as e:
-            logger.error(f"Error: {e}", exc_info=True)
+        except SystemExit:
+            raise
+        except BaseException as e:
+            # Capturar cualquier error para mantener ejecución perpetua (solo salir con SIGINT/SIGTERM)
+            logger.error(f"Error (continuando): {type(e).__name__}: {e}", exc_info=True)
             time.sleep(10)
 
     logger.info("Worker finalizado")

@@ -1,7 +1,9 @@
 import os
 from dotenv import load_dotenv
 
-load_dotenv()
+# Cargar .env desde el directorio del proyecto
+_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_dir, '.env'))
 
 class Settings:
     # 2Captcha: preferir TWOCAPTCHA_API_KEY, fallback a APIKEY_2CAPTCHA

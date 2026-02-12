@@ -1,21 +1,23 @@
-import requests
-import time
-import json
 import os
 import sys
+import time
+import json
+import logging
+import requests
 import re
-from bs4 import BeautifulSoup
 from datetime import datetime
 from threading import Thread, Lock
 from collections import deque
+from bs4 import BeautifulSoup
 
 # Cargar variables de entorno desde .env
 from dotenv import load_dotenv
-load_dotenv()
+_dir = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(os.path.dirname(_dir), '.env'))
 
-# Importar el solver de captcha desde utils
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from utils.captcha_solver import TwoCaptchaSolver
+
+logger = logging.getLogger(__name__)
 
 class TokenCache:
     """Sistema de caché de tokens reCAPTCHA compartido"""
@@ -49,14 +51,13 @@ class TokenCache:
                 daemon=True
             )
             self._background_thread.start()
-            print("🚀 [TokenCache] Pool de tokens iniciado en background")
+            logger.debug("[TokenCache] Pool de tokens iniciado en background")
     
     def warmup_pool(self, api_key, sitekey, page_url, num_tokens=2):
         """Pre-llena el pool con tokens al inicio para tener disponibles rápidamente"""
         def resolve_token():
             try:
                 solver = TwoCaptchaSolver(api_key)
-                print("🔥 [Warmup] Resolviendo token inicial...")
                 token = solver.solve_recaptcha_v2(site_key=sitekey, page_url=page_url, invisible=False)
                 if token:
                     with self._pool_lock:
@@ -64,9 +65,9 @@ class TokenCache:
                             'token': token,
                             'timestamp': time.time()
                         })
-                    print(f"✅ [Warmup] Token agregado (total: {len(self._token_pool)})")
+                    logger.debug(f"[Warmup] Token agregado (total: {len(self._token_pool)})")
             except Exception as e:
-                print(f"❌ [Warmup] Error: {e}")
+                logger.warning(f"[Warmup] Error: {e}")
         
         # Iniciar threads paralelos para resolver tokens
         threads = []
@@ -75,7 +76,7 @@ class TokenCache:
             t.start()
             threads.append(t)
         
-        print(f"🔥 [Warmup] Iniciando pre-llenado de {num_tokens} tokens en paralelo...")
+        logger.debug(f"[Warmup] Iniciando pre-llenado de {num_tokens} tokens en paralelo")
         return threads
     
     def _fill_pool(self, api_key, sitekey, page_url):
@@ -87,7 +88,6 @@ class TokenCache:
             
             if pool_size < 6:  # Mantener al menos 6 tokens (aumentado de 3)
                 try:
-                    print("🔄 [TokenCache] Resolviendo token...")
                     token = solver.solve_recaptcha_v2(site_key=sitekey, page_url=page_url, invisible=False)
                     if token:
                         with self._pool_lock:
@@ -95,9 +95,9 @@ class TokenCache:
                                 'token': token,
                                 'timestamp': time.time()
                             })
-                        print(f"✅ [TokenCache] Token agregado (total: {len(self._token_pool)})")
+                        logger.debug(f"[TokenCache] Token agregado (total: {len(self._token_pool)})")
                 except Exception as e:
-                    print(f"❌ [TokenCache] Error: {e}")
+                    logger.warning(f"[TokenCache] Error: {e}")
             
             time.sleep(1)  # Verificar cada 1 segundo (más agresivo)
     
@@ -108,7 +108,7 @@ class TokenCache:
                 token_data = self._token_pool.popleft()
                 age = time.time() - token_data['timestamp']
                 if age < max_age:
-                    print(f"⚡ [TokenCache] Token obtenido del pool (edad: {age:.1f}s)")
+                    logger.debug(f"[TokenCache] Token obtenido del pool (edad: {age:.1f}s)")
                     return token_data['token']
         return None
     
@@ -155,19 +155,17 @@ class RegistraduriaScraperAuto:
             if pool_size == 0:
                 # Iniciar background filler
                 self.token_cache.start_filler(self.api_key, self.cached_site_key, self.base_url)
-                # Iniciar warmup en paralelo para pre-llenar el pool
-                print("🔥 Iniciando pre-llenado del pool...")
                 self.token_cache.warmup_pool(self.api_key, self.cached_site_key, self.base_url, num_tokens=3)
             else:
-                print(f"♻️  Pool de tokens ya activo ({pool_size} tokens disponibles)")
+                logger.debug(f"Pool de tokens ya activo ({pool_size} tokens disponibles)")
         
         # Verificar balance solo si se solicita
         if check_balance:
             balance_info = self.captcha_solver.get_balance()
             if balance_info.get('success'):
-                balance = balance_info.get('balance_USD', balance_info.get('balance', 0))
-                captchas = balance_info.get('estimated_captchas', 0)
-                print(f"💰 2captcha - ${balance:.4f} USD ({captchas} captchas disponibles)")
+                balance = balance_info.get('balance_usd', balance_info.get('balance_USD', 0))
+                captchas = balance_info.get('estimated_requests', balance_info.get('estimated_captchas', 0))
+                logger.info(f"2captcha - ${balance:.4f} USD ({captchas} captchas disponibles)")
     
     def _is_cached_token_valid(self):
         """Verifica si el token en caché sigue válido"""
@@ -178,7 +176,7 @@ class RegistraduriaScraperAuto:
         is_valid = age < self.token_ttl
         
         if is_valid:
-            print(f"⚡ Token en caché válido (edad: {age:.1f}s / {self.token_ttl - age:.1f}s restantes)")
+            logger.debug(f"Token en caché válido (edad: {age:.1f}s)")
         
         return is_valid
     
@@ -187,18 +185,18 @@ class RegistraduriaScraperAuto:
         if not self.enable_token_pool:
             return True
         
-        print("⏳ Esperando a que el pool tenga tokens disponibles...")
+        logger.debug("Esperando a que el pool tenga tokens disponibles...")
         start = time.time()
         
         while time.time() - start < timeout:
             pool_size = self.token_cache.get_pool_size()
             if pool_size > 0:
                 elapsed = time.time() - start
-                print(f"✅ Pool listo con {pool_size} token(es) disponibles (esperó {elapsed:.1f}s)")
+                logger.debug(f"Pool listo con {pool_size} token(s) (esperó {elapsed:.1f}s)")
                 return True
             time.sleep(0.5)
         
-        print(f"⚠️  Timeout esperando pool, continuando de todos modos...")
+        logger.warning("Timeout esperando pool, continuando de todos modos")
         return False
     
     def solve_recaptcha(self):
@@ -221,7 +219,7 @@ class RegistraduriaScraperAuto:
                     return pool_token
             
             # 3. Resolver nuevo token
-            print(f"🔄 Resolviendo nuevo reCAPTCHA...")
+            logger.debug("Resolviendo nuevo reCAPTCHA...")
             captcha_response = self.captcha_solver.solve_recaptcha_v2(
                 site_key=self.cached_site_key,
                 page_url=self.base_url,
@@ -231,20 +229,17 @@ class RegistraduriaScraperAuto:
             if captcha_response:
                 self.cached_token = captcha_response
                 self.token_timestamp = time.time()
-                print("✅ reCAPTCHA resuelto")
                 return captcha_response
-            else:
-                print("❌ No se pudo resolver el reCAPTCHA")
-                return None
+            return None
                 
         except Exception as e:
-            print(f"❌ Error al resolver reCAPTCHA: {e}")
+            logger.warning(f"Error al resolver reCAPTCHA: {e}")
             return None
     
     def submit_form(self, nuip, captcha_response):
         """Envía el formulario a la API"""
         try:
-            print("📤 Enviando consulta a la API...")
+            logger.debug("Enviando consulta a la API...")
             
             post_data = {
                 "identification": str(nuip),
@@ -277,21 +272,21 @@ class RegistraduriaScraperAuto:
             response.raise_for_status()
             
             json_response = response.json()
-            print(f"✅ API respondió correctamente")
+            logger.debug("API respondió correctamente")
             
             return json_response
         
         except requests.RequestException as e:
-            print(f"❌ Error al enviar formulario: {e}")
+            logger.warning(f"Error al enviar formulario: {e}")
             if hasattr(e, 'response') and e.response is not None:
                 try:
                     error_json = e.response.json()
                     return error_json
-                except:
+                except Exception:
                     pass
             return None
         except Exception as e:
-            print(f"❌ Error general: {e}")
+            logger.warning(f"Error general enviando formulario: {e}")
             return None
     
     def extract_data(self, api_response):
@@ -309,7 +304,7 @@ class RegistraduriaScraperAuto:
                 api_response.get('status_code') == 13 and 
                 not api_response.get('data')):
                 
-                print("⚠️ Cédula no encontrada en el censo (status_code: 13)")
+                logger.info("Cédula no encontrada en el censo (status_code: 13)")
                 
                 no_censo_data = [{
                     'NUIP': 'NO CENSO',
@@ -338,7 +333,7 @@ class RegistraduriaScraperAuto:
                 
                 # Manejar caso: Cédula no habilitada (is_in_census: false con novelty)
                 if not is_in_census and novelty:
-                    print("⚠️ Cédula no habilitada en el censo")
+                    logger.info("Cédula no habilitada en el censo")
                     
                     novelty_name = novelty[0].get('name', 'NO HABILITADA').upper()
                     
@@ -374,7 +369,7 @@ class RegistraduriaScraperAuto:
                     'ZONA': str(place_address.get('zone', ''))
                 }]
                 
-                print(f"✅ Datos extraídos")
+                logger.debug("Datos extraídos correctamente")
                 
                 result = {
                     "status": "success",
@@ -395,7 +390,7 @@ class RegistraduriaScraperAuto:
                 }
         
         except Exception as e:
-            print(f"❌ Error al extraer datos: {e}")
+            logger.warning(f"Error al extraer datos: {e}")
             return {
                 "status": "error",
                 "message": f"Error al procesar respuesta: {str(e)}",
@@ -405,9 +400,7 @@ class RegistraduriaScraperAuto:
     def scrape_nuip(self, nuip):
         """Método principal para consultar un NUIP"""
         try:
-            print(f"\n{'='*50}")
-            print(f"INICIANDO CONSULTA PARA NUIP: {nuip}")
-            print(f"{'='*50}")
+            logger.debug(f"Iniciando consulta para NUIP: {nuip}")
             
             # Resolver reCAPTCHA (usará caché si está disponible)
             captcha_response = self.solve_recaptcha()
@@ -424,7 +417,7 @@ class RegistraduriaScraperAuto:
             
             # Si falla con el token actual (403), intentar con nuevo token del pool
             if api_response and not api_response.get('status'):
-                print("⚠️ Token usado, obteniendo nuevo token del pool...")
+                logger.debug("Token usado, obteniendo nuevo token del pool...")
                 # Invalidar caché
                 self.cached_token = None
                 self.token_timestamp = None
@@ -436,12 +429,12 @@ class RegistraduriaScraperAuto:
             # Extraer datos
             result = self.extract_data(api_response)
             
-            print(f"✅ CONSULTA COMPLETADA PARA NUIP: {nuip}\n")
+            logger.debug(f"Consulta completada para NUIP: {nuip}")
             
             return result
             
         except Exception as e:
-            print(f"❌ Error al consultar NUIP {nuip}: {e}")
+            logger.warning(f"Error al consultar NUIP {nuip}: {e}")
             return {
                 "status": "error",
                 "message": f"Error en la consulta: {str(e)}",
@@ -459,13 +452,13 @@ class RegistraduriaScraperAuto:
         }
         
         for i, nuip in enumerate(nuips, 1):
-            print(f"\n📋 Consultando NUIP {i}/{len(nuips)}: {nuip}")
+            logger.info(f"Consultando NUIP {i}/{len(nuips)}: {nuip}")
             
             result = self.scrape_nuip(nuip)
             results["results"].append(result)
             
             if i < len(nuips):
-                print(f"⏳ Esperando {delay} segundos...")
+                logger.debug(f"Esperando {delay} segundos...")
                 time.sleep(delay)
         
         return results
@@ -474,7 +467,7 @@ class RegistraduriaScraperAuto:
         """Cierra la sesión"""
         if self.session:
             self.session.close()
-            print("🔒 Sesión cerrada")
+            logger.debug("Sesión cerrada")
 
 # Función para guardar resultados
 def save_registraduria_results(data, filename=None):
@@ -488,18 +481,19 @@ def save_registraduria_results(data, filename=None):
     with open(filename, 'w', encoding='utf-8') as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
     
-    print(f"💾 Resultados guardados en: {filename}")
+    logger.info(f"Resultados guardados en: {filename}")
     return filename
 
 # Ejemplo de uso
 if __name__ == "__main__":
-    API_KEY = os.getenv('APIKEY_2CAPTCHA')
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    API_KEY = os.getenv('TWOCAPTCHA_API_KEY') or os.getenv('APIKEY_2CAPTCHA')
     
     if not API_KEY:
-        print("❌ Error: No se encontró la API key de 2captcha")
+        logger.error("No se encontró la API key de 2captcha (TWOCAPTCHA_API_KEY o APIKEY_2CAPTCHA)")
         sys.exit(1)
     
-    print(f"🔑 API Key cargada: {API_KEY[:10]}...")
+    logger.info(f"API Key cargada: {API_KEY[:10]}...")
     
     # Crear scraper con pool de tokens habilitado (sin verificar balance para ser más rápido)
     scraper = RegistraduriaScraperAuto(API_KEY, check_balance=False, enable_token_pool=True)
@@ -509,14 +503,14 @@ if __name__ == "__main__":
         nuip_ejemplo = "1102877148"
         resultado = scraper.scrape_nuip(nuip_ejemplo)
         
-        print(f"\n📊 RESULTADO FINAL:")
-        print(json.dumps(resultado, indent=2, ensure_ascii=False))
+        logger.info("Resultado final:")
+        logger.info(json.dumps(resultado, indent=2, ensure_ascii=False))
         
         save_registraduria_results(resultado)
         
     except KeyboardInterrupt:
-        print("\n⚠️ Proceso interrumpido por el usuario")
+        logger.info("Proceso interrumpido por el usuario")
     except Exception as e:
-        print(f"\n❌ Error crítico: {e}")
+        logger.error(f"Error crítico: {e}")
     finally:
         scraper.close()
