@@ -13,31 +13,8 @@ class Settings:
         'SUPABASE_FUNCTIONS_URL',
         'https://lsdnopjulddzkkboarsp.supabase.co/functions/v1'
     )
-    MAX_NUIPS_SYNC = 50
-    DEFAULT_DELAY = 5
-    HEADLESS_MODE = True
-    
-    # Configuración de la API
-    API_TITLE = "API Consulta Información Electoral"
-    API_VERSION = "1.0.0"
-    API_DESCRIPTION = "API para consultar información de puestos de Votación Funete de datos Registraduría Nacional del Estado Civil"
-    
-    # Configuración de endpoints externos
-    EXTERNAL_API_NOMBRE_URL = "https://api.juliocesarjarava.com.co/api/v1/respuestanombreapi"
-    EXTERNAL_API_PUESTO_URL = "https://api.juliocesarjarava.com.co/api/v1/respuestapuestoapi"
-    
-    # Configuración CORS
-    CORS_ORIGINS = [        
-        "https://api.juliocesarjarava.com.co/",
-        "http://localhost",
-        "http://localhost:80",
-        "http://localhost:3000",
-        "http://localhost:8000",
-        "http://localhost:5173",
-        "*"  # Permite todos los orígenes (usar con precaución en producción)
-    ]
-    CORS_ALLOW_CREDENTIALS = True
-    CORS_ALLOW_METHODS = ["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"]
-    CORS_ALLOW_HEADERS = ["*"]
+    # Solo congreso: status_code 13 es igual en todas las elecciones, evita 2 tokens extra
+    ELECTION_CODES_TO_TRY = os.getenv('ELECTION_CODES', 'congreso').split(',')
+    ENABLE_SCRAPER_FALLBACK = os.getenv('ENABLE_SCRAPER_FALLBACK', 'true').lower() in ('true', '1', 'yes')
 
 settings = Settings()

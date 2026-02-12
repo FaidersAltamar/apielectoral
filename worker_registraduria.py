@@ -36,6 +36,8 @@ from services.registraduria_supabase import (
     SITE_KEY,
     BASE_URL,
     query_registraduria,
+    query_registraduria_scraper_fallback,
+    NO_CENSO_DATOS,
     obtener_consultas_pendientes,
     enviar_resultado,
     TokenCache,
@@ -71,9 +73,16 @@ def _limpiar_cache_fallidas() -> None:
 
 
 def procesar_consulta(consulta: dict) -> tuple:
-    time.sleep(random.uniform(0, 3))
+    time.sleep(random.uniform(0, 0.5))
     cedula = consulta['cedula']
     resultado = query_registraduria(cedula)
+    # Solo scraper si not_found SIN no_censo (scraper usa misma API, no aporta si ya sabemos no_censo)
+    if resultado and resultado.get('status') == 'not_found' and not resultado.get('no_censo') and settings.ENABLE_SCRAPER_FALLBACK:
+        logger.info(f"Intentando scraper fallback para cedula={cedula}")
+        fallback = query_registraduria_scraper_fallback(cedula)
+        if fallback and any(v for k, v in fallback.items() if k != 'status' and v):
+            resultado = fallback
+            logger.info(f"Scraper fallback obtuvo datos para cedula={cedula}")
     return (consulta, resultado)
 
 
@@ -87,7 +96,7 @@ def main():
 
     logger.info("Worker Registraduria (Supabase) iniciado")
     logger.info(f"Supabase: {SUPABASE_FUNCTIONS_URL}/consultas-pendientes")
-    _warmup_token_pool(num_tokens=2)
+    _warmup_token_pool(num_tokens=1)
     running = True
 
     def stop(sig, frame):
@@ -104,7 +113,7 @@ def main():
             consultas = obtener_consultas_pendientes(tipo='registraduria', limit=2)
 
             if consultas:
-                with ThreadPoolExecutor(max_workers=1) as executor:
+                with ThreadPoolExecutor(max_workers=2) as executor:
                     futures = {executor.submit(procesar_consulta, c): c for c in consultas}
                     for future in as_completed(futures):
                         if not running:
@@ -112,12 +121,26 @@ def main():
                             break
                         try:
                             consulta, resultado = future.result()
-                            cola_id = consulta['id']
-                            cedula = consulta['cedula']
+                            cola_id = consulta.get('id') or consulta.get('cola_id')
+                            cedula = consulta.get('cedula') or consulta.get('numero_documento', '')
+                            elector_id = consulta.get('elector_id') or consulta.get('electorId')
+                            if cola_id is None:
+                                logger.error(f"Consulta sin id/cola_id: {list(consulta.keys())}")
+                                continue
+                            def _send(ok_flag, err=None, d=None):
+                                return enviar_resultado(cola_id, cedula, ok_flag, datos=d, error=err, elector_id=elector_id)
+
                             if resultado and resultado.get('status') == 'api_error':
-                                enviar_resultado(cola_id, cedula, False, error=resultado.get('error', 'Error API'))
+                                err_msg = resultado.get('error', 'Error API')
+                                ok = _send(False, err=err_msg)
+                                logger.info(f"Enviado (api_error) cedula={cedula} cola_id={cola_id} ok={ok} error={err_msg}")
                             elif resultado and resultado.get('status') == 'not_found':
-                                enviar_resultado(cola_id, cedula, False, error='Cedula no encontrada')
+                                if resultado.get('no_censo'):
+                                    ok = _send(True, d=NO_CENSO_DATOS)
+                                    logger.info(f"Enviado (NO CENSO) cedula={cedula} cola_id={cola_id} ok={ok}")
+                                else:
+                                    ok = _send(False, err='Cedula no encontrada')
+                                    logger.info(f"Enviado (not_found) cedula={cedula} cola_id={cola_id} ok={ok}")
                             elif resultado and any(v for k, v in resultado.items() if k != 'status' and v):
                                 datos = {
                                     'municipio_votacion': resultado.get('municipio'),
@@ -128,11 +151,13 @@ def main():
                                     'zona_votacion': resultado.get('zona'),
                                 }
                                 datos = {k: v for k, v in datos.items() if v is not None}
-                                enviar_resultado(cola_id, cedula, True, datos=datos)
+                                ok = _send(True, d=datos)
+                                logger.info(f"Enviado (exito) cedula={cedula} cola_id={cola_id} ok={ok} datos={datos}")
                             else:
-                                enviar_resultado(cola_id, cedula, False, error='No se encontraron datos')
+                                ok = _send(False, err='No se encontraron datos')
+                                logger.info(f"Enviado (sin datos) cedula={cedula} cola_id={cola_id} ok={ok} resultado={resultado}")
                         except Exception as e:
-                            logger.error(f"Error procesando consulta: {e}")
+                            logger.error(f"Error procesando consulta: {e}", exc_info=True)
                 time.sleep(5)
 
             if not consultas:

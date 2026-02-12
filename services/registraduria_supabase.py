@@ -178,109 +178,143 @@ def solve_recaptcha(site_key: str, page_url: str) -> Optional[str]:
     return _solve_recaptcha_direct(site_key, page_url)
 
 
+def _query_registraduria_with_code(cedula: str, election_code: str) -> Optional[Dict[str, Any]]:
+    """Consulta API con un election_code especifico. Retorna None si status_code 13 (para reintentar)."""
+    session = _get_session()
+    payload = {
+        "identification": str(cedula),
+        "identification_type": "CC",
+        "election_code": election_code.strip(),
+        "module": "polling_place",
+        "platform": "web"
+    }
+    for intento_token in range(2):
+        token = solve_recaptcha(SITE_KEY, BASE_URL)
+        if not token:
+            return None
+        headers = {
+            'Content-Type': 'application/json',
+            'Authorization': f'Bearer {token}',
+            'Sec-Ch-Ua': '"Chromium";v="120", "Not_A Brand";v="99"',
+            'Sec-Ch-Ua-Mobile': '?0',
+            'Sec-Ch-Ua-Platform': '"Windows"',
+            'Sec-Fetch-Dest': 'empty',
+            'Sec-Fetch-Mode': 'cors',
+            'Sec-Fetch-Site': 'cross-site',
+        }
+        resp = None
+        for intento in range(3):
+            resp = session.post(API_URL, json=payload, headers=headers, timeout=15)
+            if resp.status_code == 200:
+                break
+            if resp.status_code == 404:
+                try:
+                    data = resp.json()
+                    if data.get('status_code') == 13:
+                        return {"status": "not_found", "no_censo": True}  # Respuesta definitiva, no probar otros codes
+                except Exception:
+                    pass
+                _registrar_cedula_fallo(cedula)
+                return {"status": "api_error", "error": "API no disponible (404)"}
+            if resp.status_code == 403:
+                break
+            if resp.status_code == 500 and intento < 2:
+                time.sleep(10 + 5 * intento)
+                continue
+            if resp.status_code != 403:
+                resp.raise_for_status()
+                break
+
+        if resp and resp.status_code == 200:
+            break
+        if resp and resp.status_code == 403:
+            if intento_token < 1:
+                time.sleep(5)
+                continue
+            _registrar_cedula_fallo(cedula)
+            return {"status": "api_error", "error": "API no disponible (403 Forbidden)"}
+        if resp and resp.status_code != 200:
+            resp.raise_for_status()
+
+    if not resp or resp.status_code != 200:
+        return None
+
+    data = resp.json()
+    if data.get('status') is False and data.get('status_code') == 13:
+        return {"status": "not_found", "no_censo": True}
+    if not data.get('status') or not data.get('data'):
+        return None
+
+    inner = data.get('data', {})
+    voter = inner.get('voter', {}) or {}
+    polling_place = inner.get('polling_place', {}) or {}
+    place_address = (polling_place.get('place_address') or {}) if polling_place else {}
+
+    has_voter = bool(voter.get('identification'))
+    has_place = bool(polling_place.get('stand') or place_address.get('address') or place_address.get('state'))
+    has_novelty = bool(inner.get('novelty'))
+    if not has_voter and not has_place and not has_novelty:
+        return {"status": "not_found"}
+
+    if not inner.get('is_in_census', True) and inner.get('novelty'):
+        nov = inner['novelty'][0]
+        return {
+            "nuip": str(voter.get('identification', '')),
+            "departamento": "NO HABILITADA",
+            "municipio": "NO HABILITADA",
+            "puesto": nov.get('name', 'NO HABILITADA'),
+            "direccion": "NO HABILITADA",
+            "mesa": "0",
+            "zona": "",
+        }
+
+    return {
+        "nuip": str(voter.get('identification', cedula)),
+        "departamento": place_address.get('state') or '',
+        "municipio": place_address.get('town') or '',
+        "puesto": polling_place.get('stand') or '',
+        "direccion": place_address.get('address') or '',
+        "mesa": str(polling_place.get('table', '')),
+        "zona": str(place_address.get('zone', '')),
+    }
+
+
 def query_registraduria(cedula: str) -> Optional[Dict[str, Any]]:
-    """Consulta lugar de votación vía API directa infovotantes."""
+    """Consulta lugar de votacion via API directa. Intenta multiples election_code."""
     try:
         if _cedula_fallo_reciente(cedula):
             return {"status": "api_error", "error": "Reintento bloqueado 20min"}
         logger.info(f"Consultando Registraduria para cedula: {cedula}")
 
-        session = _get_session()
-        payload = {
-            "identification": str(cedula),
-            "identification_type": "CC",
-            "election_code": "congreso",
-            "module": "polling_place",
-            "platform": "web"
-        }
+        election_codes = getattr(settings, 'ELECTION_CODES_TO_TRY', ['congreso', 'presidencial', 'alcaldes'])
+        for ec in election_codes:
+            ec = ec.strip() if isinstance(ec, str) else str(ec)
+            if not ec:
+                continue
+            logger.info(f"Intentando election_code={ec}")
+            result = _query_registraduria_with_code(cedula, ec)
+            if result is None:
+                continue
+            if result.get('status') == 'not_found':
+                if result.get('no_censo'):
+                    return result  # Respuesta definitiva, no probar otros codes
+                continue
+            if result.get('status') == 'api_error':
+                return result
+            return result
 
-        for intento_token in range(2):
-            token = solve_recaptcha(SITE_KEY, BASE_URL)
-            if not token:
-                return None
-            headers = {
-                'Content-Type': 'application/json',
-                'Authorization': f'Bearer {token}',
-                'Sec-Ch-Ua': '"Chromium";v="120", "Not_A Brand";v="99"',
-                'Sec-Ch-Ua-Mobile': '?0',
-                'Sec-Ch-Ua-Platform': '"Windows"',
-                'Sec-Fetch-Dest': 'empty',
-                'Sec-Fetch-Mode': 'cors',
-                'Sec-Fetch-Site': 'cross-site',
-            }
-            resp = None
-            for intento in range(3):
-                resp = session.post(API_URL, json=payload, headers=headers, timeout=15)
-                if resp.status_code == 200:
-                    break
-                if resp.status_code == 404:
-                    _registrar_cedula_fallo(cedula)
-                    return {"status": "api_error", "error": "API no disponible (404)"}
-                if resp.status_code == 403:
-                    break
-                if resp.status_code == 500 and intento < 2:
-                    time.sleep(10 + 5 * intento)
-                    continue
-                if resp.status_code != 403:
-                    resp.raise_for_status()
-                    break
-
-            if resp and resp.status_code == 200:
-                break
-            if resp and resp.status_code == 403:
-                if intento_token < 1:
-                    time.sleep(5)
-                    continue
-                _registrar_cedula_fallo(cedula)
-                return {"status": "api_error", "error": "API no disponible (403 Forbidden)"}
-            if resp and resp.status_code != 200:
-                resp.raise_for_status()
-
-        if not resp or resp.status_code != 200:
-            return None
-
-        data = resp.json()
-        if data.get('status') is False and data.get('status_code') == 13:
-            return {"status": "not_found"}
-        if not data.get('status') or not data.get('data'):
-            return None
-
-        inner = data.get('data', {})
-        voter = inner.get('voter', {}) or {}
-        polling_place = inner.get('polling_place', {}) or {}
-        place_address = (polling_place.get('place_address') or {}) if polling_place else {}
-
-        has_voter = bool(voter.get('identification'))
-        has_place = bool(polling_place.get('stand') or place_address.get('address') or place_address.get('state'))
-        has_novelty = bool(inner.get('novelty'))
-        if not has_voter and not has_place and not has_novelty:
-            return {"status": "not_found"}
-
-        if not inner.get('is_in_census', True) and inner.get('novelty'):
-            nov = inner['novelty'][0]
-            return {
-                "nuip": str(voter.get('identification', '')),
-                "departamento": "NO HABILITADA",
-                "municipio": "NO HABILITADA",
-                "puesto": nov.get('name', 'NO HABILITADA'),
-                "direccion": "NO HABILITADA",
-                "mesa": "0",
-                "zona": "",
-            }
-
-        return {
-            "nuip": str(voter.get('identification', cedula)),
-            "departamento": place_address.get('state') or '',
-            "municipio": place_address.get('town') or '',
-            "puesto": polling_place.get('stand') or '',
-            "direccion": place_address.get('address') or '',
-            "mesa": str(polling_place.get('table', '')),
-            "zona": str(place_address.get('zone', '')),
-        }
+        return {"status": "not_found", "no_censo": True}
     except requests.RequestException as e:
         logger.error(f"Error API: {e}")
         if hasattr(e, 'response') and e.response is not None:
             code = e.response.status_code
+            if code == 404:
+                try:
+                    data = e.response.json()
+                    if data.get('status_code') == 13:
+                        return {"status": "not_found", "no_censo": True}
+                except Exception:
+                    pass
             if code in (403, 404):
                 _registrar_cedula_fallo(cedula)
             if code == 404:
@@ -293,6 +327,49 @@ def query_registraduria(cedula: str) -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.error(f"Error: {e}", exc_info=True)
         return None
+
+
+def query_registraduria_scraper_fallback(cedula: str) -> Optional[Dict[str, Any]]:
+    """Fallback con scraper Playwright cuando la API directa devuelve not_found."""
+    if not getattr(settings, 'ENABLE_SCRAPER_FALLBACK', True):
+        return None
+    if not TWOCAPTCHA_API_KEY:
+        return None
+    try:
+        from scrapper.registraduria_scraper_optimizado import RegistraduriaScraperAuto
+        scraper = RegistraduriaScraperAuto(TWOCAPTCHA_API_KEY, check_balance=False, enable_token_pool=False)
+        try:
+            result = scraper.scrape_nuip(cedula)
+            if result.get('status') != 'success':
+                return None
+            data_records = result.get('data', [])
+            if not data_records:
+                return None
+            rec = data_records[0]
+            return {
+                'nuip': rec.get('NUIP', cedula),
+                'departamento': rec.get('DEPARTAMENTO', ''),
+                'municipio': rec.get('MUNICIPIO', ''),
+                'puesto': rec.get('PUESTO', ''),
+                'direccion': rec.get('DIRECCIÓN', rec.get('DIRECCION', '')),
+                'mesa': str(rec.get('MESA', '')),
+                'zona': str(rec.get('ZONA', '')),
+            }
+        finally:
+            scraper.close()
+    except Exception as e:
+        logger.warning(f"Scraper fallback error: {e}")
+        return None
+
+
+NO_CENSO_DATOS = {
+    'municipio_votacion': 'NO CENSO',
+    'departamento_votacion': 'NO CENSO',
+    'puesto_votacion': 'NO CENSO',
+    'direccion_puesto': 'NO CENSO',
+    'mesa': 'NO CENSO',
+    'zona_votacion': 'NO CENSO',
+}
 
 
 def obtener_consultas_pendientes(tipo: str = 'registraduria', limit: int = 50) -> List[Dict]:
@@ -313,32 +390,58 @@ def obtener_consultas_pendientes(tipo: str = 'registraduria', limit: int = 50) -
             return []
         if resp.status_code != 200:
             logger.error(f"Supabase: HTTP {resp.status_code} - {resp.text[:200]}")
-            return []
+            resp.raise_for_status()
         data = resp.json()
-        return data.get('consultas', [])
+        consultas = data.get('consultas', [])
+        if not consultas:
+            logger.info("Supabase OK (HTTP 200) pero 0 consultas pendientes en cola")
+        elif consultas:
+            logger.info(f"Consulta keys: {list(consultas[0].keys())}")
+        return consultas
+    except requests.exceptions.Timeout:
+        logger.error(f"Supabase: Timeout al conectar con {url}")
+        return []
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Supabase: Error de conexion - {e}")
+        return []
     except Exception as e:
-        logger.error(f"Supabase: Error obteniendo consultas: {e}")
+        logger.error(f"Supabase: Error obteniendo consultas: {e}", exc_info=True)
         return []
 
 
-def enviar_resultado(cola_id: str, cedula: str, exito: bool, datos: Optional[Dict] = None, error: Optional[str] = None) -> bool:
+def enviar_resultado(cola_id: str, cedula: str, exito: bool, datos: Optional[Dict] = None, error: Optional[str] = None, elector_id: Optional[str] = None) -> bool:
     """Envía resultado a Supabase."""
     if not CONSULTA_API_TOKEN or not SUPABASE_FUNCTIONS_URL:
         return False
+    payload = {
+        'cola_id': cola_id, 'cedula': cedula, 'numero_documento': cedula,
+        'tipo': 'registraduria', 'exito': exito, 'datos': datos or {}, 'error': error
+    }
+    if elector_id is not None:
+        payload['elector_id'] = elector_id
     try:
         resp = requests.post(
             f"{SUPABASE_FUNCTIONS_URL.rstrip('/')}/recibir-datos",
-            json={
-                'cola_id': cola_id, 'cedula': cedula, 'tipo': 'registraduria',
-                'exito': exito, 'datos': datos, 'error': error
-            },
+            json=payload,
             headers={'Authorization': f'Bearer {CONSULTA_API_TOKEN}', 'Content-Type': 'application/json'},
             timeout=30
         )
+        resp_body = resp.text[:500] if resp.text else ''
         if resp.status_code in (401, 404):
+            logger.error(f"Error enviando: {resp.status_code} - {resp_body}")
             return False
         resp.raise_for_status()
-        return resp.json().get('success', False)
+        try:
+            resp_json = resp.json()
+        except Exception:
+            resp_json = {}
+        ok = resp_json.get('success', False)
+        msg = resp_json.get('message', resp_json.get('error', ''))
+        if not ok:
+            logger.warning(f"recibir-datos success=False cedula={cedula} cola_id={cola_id} resp={resp_body}")
+        elif msg:
+            logger.info(f"recibir-datos ok cedula={cedula} message={msg}")
+        return ok
     except Exception as e:
-        logger.error(f"Error enviando resultado: {e}")
+        logger.error(f"Error enviando resultado: {e}", exc_info=True)
         return False
