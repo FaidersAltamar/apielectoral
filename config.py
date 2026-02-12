@@ -4,7 +4,15 @@ from dotenv import load_dotenv
 load_dotenv()
 
 class Settings:
-    API_KEY_2CAPTCHA = os.getenv('APIKEY_2CAPTCHA')
+    # 2Captcha: preferir TWOCAPTCHA_API_KEY, fallback a APIKEY_2CAPTCHA
+    API_KEY_2CAPTCHA = os.getenv('TWOCAPTCHA_API_KEY') or os.getenv('APIKEY_2CAPTCHA')
+    # Token para Supabase/Lovable Cloud (consultas pendientes)
+    CONSULTA_API_TOKEN = os.getenv('CONSULTA_API_TOKEN', '')
+    # URL de Supabase Edge Functions (opcional)
+    SUPABASE_FUNCTIONS_URL = os.getenv(
+        'SUPABASE_FUNCTIONS_URL',
+        'https://lsdnopjulddzkkboarsp.supabase.co/functions/v1'
+    )
     MAX_NUIPS_SYNC = 50
     DEFAULT_DELAY = 5
     HEADLESS_MODE = True

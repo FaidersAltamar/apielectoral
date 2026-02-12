@@ -324,7 +324,8 @@ class PoliciaJudicialScraper:
             r.raise_for_status()
             print(f"✅ Navegación a antecedentes completada: status={r.status_code}, length={len(r.text)}")
             try:
-                print(f"🔍 Preview respuesta (first 300 chars): {r.text[:300].replace('\n', ' ')}")
+                preview = r.text[:300].replace('\n', ' ')
+                print(f"🔍 Preview respuesta (first 300 chars): {preview}")
             except Exception:
                 pass
 
@@ -443,7 +444,8 @@ class PoliciaJudicialScraper:
             r.raise_for_status()
             print(f"✅ Consulta enviada, status={r.status_code}, length={len(r.text)}")
             try:
-                print(f"🔍 Preview respuesta (first 500 chars): {r.text[:500].replace('\n', ' ')}")
+                preview = r.text[:500].replace('\n', ' ')
+                print(f"🔍 Preview respuesta (first 500 chars): {preview}")
             except Exception:
                 pass
 
