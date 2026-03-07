@@ -1,10 +1,13 @@
 """
 Worker de consulta Registraduría - Lugar de votación
-Usa API directa de infovotantes (sin Playwright).
+Usa API directa de infovotantes vía ScraperAPI (evita bloqueo Huella Digital).
 
 Variables de entorno (o archivo .env):
 - TWOCAPTCHA_API_KEY: API key de 2Captcha
 - CONSULTA_API_TOKEN: Token para Supabase/Lovable Cloud
+- SCRAPER_API_KEY: (opcional) Usar solo esta key; si no, lee proxy.txt
+- SCRAPER_PREMIUM: (opcional) true/false, default true
+- PROXY_FILE: (opcional) Ruta a proxy.txt, default proxy.txt
 
 Ejecutar: python main.py
 """
@@ -41,6 +44,8 @@ try:
 except ImportError:
     HAS_2CAPTCHA_LIB = False
 
+from scraper_pool import get_scraper_pool
+
 # Configuración
 TWOCAPTCHA_API_KEY = os.getenv('TWOCAPTCHA_API_KEY')
 CONSULTA_API_TOKEN = os.getenv('CONSULTA_API_TOKEN', '')
@@ -51,6 +56,14 @@ SUPABASE_FUNCTIONS_URL = os.getenv(
 
 API_URL = "https://apiweb-eleccionescolombia.infovotantes.com/api/v1/citizen/get-information"
 BASE_URL = "https://eleccionescolombia.registraduria.gov.co/identificacion"
+SCRAPER_API_URL = "https://api.scraperapi.com"
+SCRAPER_TIMEOUT = 70
+# premium=true: IPs residenciales/móviles (10 créditos), evita bloqueos Huella Digital
+# ultra_premium: bypass avanzado (30 créditos) - NO compatible con keep_headers (rompe Bearer)
+# country_code: requiere plan con geotargeting; planes básicos no incluyen 'co' (Colombia)
+SCRAPER_PREMIUM = os.getenv('SCRAPER_PREMIUM', 'true').lower() in ('true', '1', 'yes')
+SCRAPER_COUNTRY = os.getenv('SCRAPER_COUNTRY', '')  # Vacío: sin geotargeting (evita 403 en planes básicos)
+SCRAPER_KEEP_HEADERS = os.getenv('SCRAPER_KEEP_HEADERS', 'true').lower() in ('true', '1', 'yes')
 SITE_KEY = "6Lc9DmgrAAAAAJAjWVhjDy1KSgqzqJikY5z7I9SV"
 
 USER_AGENT = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
@@ -168,10 +181,26 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
 
     if HAS_2CAPTCHA_LIB:
         try:
-            solver = TwoCaptcha(TWOCAPTCHA_API_KEY, pollingInterval=1, defaultTimeout=60)
-            result = solver.recaptcha(sitekey=site_key, url=page_url, invisible=0, pollingInterval=1)
-            logger.info("CAPTCHA resuelto (librería 2captcha)")
-            return result['code'] if isinstance(result, dict) else result
+            # 2captcha-python 1.2+ usa timeout/polling_interval; 1.1.x usa defaultTimeout/pollingInterval
+            try:
+                solver = TwoCaptcha(TWOCAPTCHA_API_KEY, timeout=60, polling_interval=1)
+                use_new_api = True
+            except TypeError:
+                solver = TwoCaptcha(TWOCAPTCHA_API_KEY, pollingInterval=1, defaultTimeout=60)
+                use_new_api = False
+
+            if use_new_api:
+                task = {'type': 'RecaptchaV2TaskProxyless', 'websiteURL': page_url, 'websiteKey': site_key}
+                result = solver.solve_captcha(task)
+                token = (result.get('solution') or {}).get('gRecaptchaResponse') or (result.get('solution') or {}).get('token')
+            else:
+                result = solver.recaptcha(sitekey=site_key, url=page_url, invisible=0, pollingInterval=1)
+                token = result.get('code') if isinstance(result, dict) else result
+
+            if token:
+                logger.info("CAPTCHA resuelto (librería 2captcha)")
+                return token
+            return None
         except ApiException as e:
             msg = str(e)
             if 'ERROR_WRONG_GOOGLEKEY' in msg:
@@ -180,9 +209,20 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
                     parsed = urlparse(page_url)
                     origin = f"{parsed.scheme}://{parsed.netloc}"
                     logger.warning(f"ERROR_WRONG_GOOGLEKEY, reintentando con origen: {origin}")
-                    solver = TwoCaptcha(TWOCAPTCHA_API_KEY, pollingInterval=1, defaultTimeout=60)
-                    result = solver.recaptcha(sitekey=site_key, url=origin, invisible=0, pollingInterval=1)
-                    return result['code'] if isinstance(result, dict) else result
+                    try:
+                        solver = TwoCaptcha(TWOCAPTCHA_API_KEY, timeout=60, polling_interval=1)
+                        use_new_api = True
+                    except TypeError:
+                        solver = TwoCaptcha(TWOCAPTCHA_API_KEY, pollingInterval=1, defaultTimeout=60)
+                        use_new_api = False
+                    if use_new_api:
+                        task = {'type': 'RecaptchaV2TaskProxyless', 'websiteURL': origin, 'websiteKey': site_key}
+                        result = solver.solve_captcha(task)
+                        token = (result.get('solution') or {}).get('gRecaptchaResponse') or (result.get('solution') or {}).get('token')
+                    else:
+                        result = solver.recaptcha(sitekey=site_key, url=origin, invisible=0, pollingInterval=1)
+                        token = result.get('code') if isinstance(result, dict) else result
+                    return token if token else None
                 except Exception:
                     pass
             logger.error(f"Error 2Captcha API: {e}")
@@ -194,7 +234,7 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
     # Fallback: requests directo
     try:
         session = _get_session()
-        resp = session.post('http://2captcha.com/in.php', data={
+        resp = session.post('https://2captcha.com/in.php', data={
             'key': TWOCAPTCHA_API_KEY,
             'method': 'userrecaptcha',
             'googlekey': site_key,
@@ -215,7 +255,7 @@ def _solve_recaptcha_direct(site_key: str, page_url: str) -> Optional[str]:
         logger.info(f"CAPTCHA enviado, ID: {captcha_id}")
         for attempt in range(50):
             time.sleep(1.5 if attempt < 10 else 2)
-            resp = session.get('http://2captcha.com/res.php', params={
+            resp = session.get('https://2captcha.com/res.php', params={
                 'key': TWOCAPTCHA_API_KEY,
                 'action': 'get', 'id': captcha_id, 'json': 1
             }, timeout=10)
@@ -302,45 +342,86 @@ def query_registraduria(cedula: str) -> Optional[Dict[str, Any]]:
                 'Sec-Fetch-Site': 'cross-site',
             }
 
+            pool = get_scraper_pool()
             resp = None
-            for intento in range(3):
-                resp = session.post(API_URL, json=payload, headers=headers, timeout=15)
-                if resp.status_code == 200:
+            max_ciclos_500 = 3  # Máx ciclos de 500 antes de dar por perdida la consulta
+            ciclos_500 = 0
+            while True:
+                api_key = pool.get_next_key()
+                if not api_key:
+                    logger.error("ScraperAPI: no hay cuentas disponibles (proxy.txt vacio o invalido)")
+                    return {"status": "api_error", "error": "Sin cuentas ScraperAPI disponibles"}
+
+                scraper_params = {
+                    "api_key": api_key,
+                    "premium": "true" if SCRAPER_PREMIUM else "false",
+                    "keep_headers": "true" if SCRAPER_KEEP_HEADERS else "false",
+                    "url": API_URL,
+                }
+                if SCRAPER_COUNTRY:
+                    scraper_params["country_code"] = SCRAPER_COUNTRY
+                resp = None
+                for intento in range(3):
+                    resp = session.post(
+                        SCRAPER_API_URL,
+                        params=scraper_params,
+                        json=payload,
+                        headers=headers,
+                        timeout=SCRAPER_TIMEOUT,
+                    )
+                    if resp.status_code == 200:
+                        break
+                    if resp.status_code == 404:
+                        break
+                    if resp.status_code == 403:
+                        pool.mark_exhausted(api_key)
+                        logger.warning(f"ScraperAPI 403 (creditos agotados), rotando a siguiente cuenta")
+                        break
+                    if resp.status_code == 401:
+                        pool.mark_exhausted(api_key)
+                        logger.warning(f"ScraperAPI 401 (key invalida), rotando a siguiente cuenta")
+                        break
+                    if resp.status_code == 429:
+                        logger.warning("ScraperAPI 429 (demasiadas peticiones), esperando 5s...")
+                        time.sleep(5)
+                        continue
+                    if resp.status_code == 500 and intento < 2:
+                        delay = 10 + (5 * intento)
+                        logger.warning(f"ScraperAPI 500, reintentando en {delay}s...")
+                        time.sleep(delay)
+                        continue
+                    if resp.status_code == 500:
+                        logger.warning("ScraperAPI 500 persistente, rotando a siguiente cuenta")
+                        break
+                    if resp.status_code not in (403, 401):
+                        resp.raise_for_status()
+                        break
+
+                if resp and resp.status_code == 200:
                     break
-                if resp.status_code == 404:
-                    # La API usa 404 con JSON para "cédula no en censo" (status_code 13)
+                if resp and resp.status_code == 404:
                     try:
                         data_404 = resp.json()
                         if data_404.get('status_code') == 13:
                             return {"status": "not_found"}
                     except Exception:
                         pass
-                    # 404 sin JSON válido = error de API
-                    logger.warning("API 404 inesperado, token consumido - sin retry")
+                    logger.warning("API 404 inesperado - sin retry")
                     _registrar_cedula_fallo(cedula)
                     return {"status": "api_error", "error": "API no disponible (404)"}
-                if resp.status_code == 403:
-                    logger.warning("API 403, token posiblemente usado - obteniendo token nuevo...")
-                    break
-                if resp.status_code == 500 and intento < 2:
-                    delay = 10 + (5 * intento)
-                    logger.warning(f"API 500, reintentando en {delay}s...")
-                    time.sleep(delay)
+                if resp and resp.status_code in (403, 401, 500):
+                    if resp.status_code == 500:
+                        ciclos_500 += 1
+                        if ciclos_500 >= max_ciclos_500:
+                            logger.warning(f"ScraperAPI 500 tras {max_ciclos_500} ciclos, cedula {cedula} - api_error")
+                            _registrar_cedula_fallo(cedula)
+                            return {"status": "api_error", "error": "API temporalmente no disponible (500)"}
+                    if pool.get_pool_size() == 0:
+                        logger.info("ScraperAPI: todas las cuentas agotadas, reiniciando ciclo...")
+                        time.sleep(2)
                     continue
-                if resp.status_code != 403:
+                if resp and resp.status_code != 200:
                     resp.raise_for_status()
-                    break
-
-            if resp and resp.status_code == 200:
-                break
-            if resp and resp.status_code == 403:
-                if intento_token < max_intentos_con_token_nuevo:
-                    time.sleep(5)
-                    continue
-                _registrar_cedula_fallo(cedula)
-                return {"status": "api_error", "error": "API no disponible (403 Forbidden)"}
-            if resp and resp.status_code != 200:
-                resp.raise_for_status()
 
         if not resp or resp.status_code != 200:
             return None
@@ -475,6 +556,8 @@ def main():
 
     logger.info("Worker Registraduria iniciado")
     logger.info(f"Supabase: {SUPABASE_FUNCTIONS_URL}/consultas-pendientes")
+    pool = get_scraper_pool()
+    logger.info(f"ScraperAPI: {pool.get_total_size()} cuentas | premium={SCRAPER_PREMIUM}")
     if ENABLE_TOKEN_POOL:
         _warmup_token_pool(num_tokens=2)
     running = True
@@ -504,9 +587,14 @@ def main():
                             cola_id = consulta['id']
                             cedula = consulta['cedula']
                             if resultado and resultado.get('status') == 'api_error':
-                                enviar_resultado(cola_id, cedula, False, error=resultado.get('error', 'Error API'))
+                                ok = enviar_resultado(cola_id, cedula, False, error=resultado.get('error', 'Error API'))
+                                logger.info(f"Enviado api_error cedula={cedula}: {'OK' if ok else 'FAIL'}")
                             elif resultado and resultado.get('status') == 'not_found':
-                                enviar_resultado(cola_id, cedula, False, error='Cedula no encontrada')
+                                ok = enviar_resultado(cola_id, cedula, False, error='Cedula no encontrada')
+                                logger.info(f"Enviado not_found cedula={cedula}: {'OK' if ok else 'FAIL'}")
+                            elif resultado is None:
+                                ok = enviar_resultado(cola_id, cedula, False, error='Error en consulta (CAPTCHA o API)')
+                                logger.info(f"Enviado error_consulta cedula={cedula}: {'OK' if ok else 'FAIL'}")
                             elif resultado and any(v for k, v in resultado.items() if k != 'status' and v):
                                 datos = {
                                     'municipio_votacion': resultado.get('municipio'),
@@ -517,9 +605,11 @@ def main():
                                     'zona_votacion': resultado.get('zona'),
                                 }
                                 datos = {k: v for k, v in datos.items() if v is not None}
-                                enviar_resultado(cola_id, cedula, True, datos=datos)
+                                ok = enviar_resultado(cola_id, cedula, True, datos=datos)
+                                logger.info(f"Enviado exito cedula={cedula} puesto={resultado.get('puesto', '')}: {'OK' if ok else 'FAIL'}")
                             else:
-                                enviar_resultado(cola_id, cedula, False, error='No se encontraron datos')
+                                ok = enviar_resultado(cola_id, cedula, False, error='No se encontraron datos')
+                                logger.info(f"Enviado sin_datos cedula={cedula}: {'OK' if ok else 'FAIL'}")
                         except Exception as e:
                             logger.error(f"Error procesando consulta: {e}")
                 time.sleep(5)
